@@ -30,7 +30,7 @@ Usage:
 - Launch script:  sudo python3 nrt.py
 
 Sample Output:
-
+```
 austin@client1:~ $ sudo python nrt.py
 Interface to configure (e.g., eth0): eth1
 IP address: 10.0.0.2
@@ -115,6 +115,7 @@ Restoring original state...
 Synchronizing state of frr.service with SysV service script with /lib/systemd/systemd-sysv-install.
 Executing: /lib/systemd/systemd-sysv-install disable frr
 Removed FRR config, stopped service, restored DNS.
+```
 
 Notes:
 - Only tested on Raspberry Pi, should run on any debian based distribution
