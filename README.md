@@ -3,7 +3,7 @@ Script to test that a network is ready to support a Nile installation.  The scri
 
 Running this script will test:
 - OSPF
-  - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency.
+  - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency and advertise routes for defined subnets (NSB, Sensor, Client).
   - Will fall back to static if this fails.
 - DNS Reachability
   - Will try the default DNS servers for Nile.
