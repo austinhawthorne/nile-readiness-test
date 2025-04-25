@@ -122,3 +122,4 @@ Notes:
 - Only tested on Raspberry Pi, should run on any debian based distribution
 - Will be adding in checks for Nile Cloud Services, like Guest
 - Will add the ability to check for dependencies and install if missing
+- RADIUS is sourced from the interface IP of the uplink, need to change to the NSB subnet interface IP.  Radclient does not allow this, need to investigate.
