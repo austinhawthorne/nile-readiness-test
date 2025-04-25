@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-config_router.py - Configures host interface, OSPF adjacency dynamically,
+nrt.py - Configures host interface, OSPF adjacency dynamically,
 loopback interfaces, default route fallback, connectivity tests (DHCP/RADIUS,
 NTP, HTTPS), then restores host to original state (including removing FRR config,
 stopping FRR) and DNS changes.
 
-Usage: sudo ./config_router.py [--debug]
+Usage: sudo ./nrt.py [--debug]
 """
 
 import os
