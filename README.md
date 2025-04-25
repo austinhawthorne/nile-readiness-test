@@ -19,11 +19,11 @@ Running this script will test:
 
 Requires:
 - frr
-- scapy
+- scapy (python module)
 - dig
 - ntpdate
 - curl
-- radclient
+- radclient (bundled with freeradius)
 
 Usage:  
 - Connect host to upstream firewall port that will be used for Nile uplink
