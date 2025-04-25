@@ -14,7 +14,7 @@ Running this script will test:
   - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
 - RADIUS Reachability
   - Will run a sythentic test against a user defined RADIUS server.
-- Required Site Reachability for Nile Service
+- Required Cloud Reachability for Nile Service
   - Will run a TCP SYN test via NMAP
 
 Requires:
