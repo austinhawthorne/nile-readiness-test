@@ -9,6 +9,7 @@ Running this script will test:
   - Will try the default DNS servers for Nile.
   - If that fails, will prompt for a user specified DNS server to use.
 - NTP Reachability
+  - Will run a test to sync with default Nile defined NTP servers
 - DHCP Server Reachability
   - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
 - RADIUS Reachability
