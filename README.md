@@ -121,3 +121,4 @@ Removed FRR config, stopped service, restored DNS.
 Notes:
 - Only tested on Raspberry Pi, should run on any debian based distribution
 - Will be adding in checks for Nile Cloud Services, like Guest
+- Will add the ability to check for dependencies and install if missing
