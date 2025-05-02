@@ -167,11 +167,15 @@ This will:
 - Verify that the VNC interface has the correct IP address and can reach the gateway
 - If you see "Xvnc: command not found", install TigerVNC with: `sudo apt install tigervnc-standalone-server`
 - If you see "xterm: command not found", install xterm with: `sudo apt install xterm`
-- If you see "unrecognized option" errors, your version of TigerVNC might have different command line options. The script tries to detect and adapt to different versions, but you may need to:
+- The script now uses minimal options that should work with all versions of TigerVNC
+- If you still see "unrecognized option" errors, you may need to:
   - Check the Xvnc man page with `man Xvnc` to see the supported options
-  - Edit the script to use the correct options for your version
-  - Common variations include `-rfbaddr` vs `-listen` and whether `-xstartup` is supported
-- If you have issues connecting to the VNC server, check that your VNC client is connecting to the correct IP address and port
+  - Edit the script to use only the options supported by your version
+  - Try running with just the basic options: `Xvnc :0`
+- If you have issues connecting to the VNC server:
+  - Make sure you're connecting to the correct IP address and port
+  - Try connecting to the display directly: `vncviewer $VNC_IP:0`
+  - Check if the VNC server is listening with: `ip netns exec vnc_ns netstat -tuln | grep 5900`
 
 ### FRR Test Issues
 

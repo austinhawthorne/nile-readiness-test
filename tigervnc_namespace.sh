@@ -75,29 +75,22 @@ xterm &
 EOF
 chmod +x /tmp/.vnc/xstartup
 
-# Start TigerVNC server in the namespace
+# Start TigerVNC server in the namespace with minimal options
 echo "Starting TigerVNC server in namespace $VNC_NS"
 
-# Try to determine if this version of TigerVNC supports the -xstartup option
-if Xvnc -help 2>&1 | grep -q xstartup; then
-  # Version supports -xstartup
-  ip netns exec $VNC_NS \
-    Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 -SecurityTypes None \
-    -rfbaddr $VNC_IP -rfbport $VNC_PORT \
-    -xstartup /tmp/.vnc/xstartup &
-else
-  # Version doesn't support -xstartup, start without it
-  ip netns exec $VNC_NS \
-    Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 -SecurityTypes None \
-    -rfbaddr $VNC_IP -rfbport $VNC_PORT &
-    
-  # Wait for VNC server to start
-  sleep 2
-  
-  # Start xterm manually
-  ip netns exec $VNC_NS \
-    DISPLAY=:0 xterm &
-fi
+# Use the most basic options that should work with all versions
+ip netns exec $VNC_NS \
+  Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 &
+
+# Wait for VNC server to start
+sleep 2
+
+# Start xterm manually
+echo "Starting xterm in namespace $VNC_NS"
+ip netns exec $VNC_NS bash -c "DISPLAY=:0 xterm &"
+
+# Print connection information
+echo "VNC server is running on $VNC_IP:$VNC_PORT"
 
 # Wait for VNC server to start
 sleep 2
