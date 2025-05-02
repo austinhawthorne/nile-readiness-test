@@ -2,22 +2,19 @@
 
 This repository contains scripts for running Nile Readiness Tests while isolating network interfaces using Linux network namespaces. This approach allows you to:
 
-1. Run WayVNC server on one interface (e.g., end0) in a separate network namespace
+1. Run VNC server on one interface (e.g., end0) in a separate network namespace
 2. Run FRR tests on another interface (e.g., enxf0a731f41761) in the default namespace
 
 ## Scripts
 
-- **vnc_namespace.sh**: Creates a network namespace for WayVNC server and moves the specified interface to that namespace
-- **tigervnc_namespace.sh**: Alternative script that uses TigerVNC instead of WayVNC (more compatible with different systems)
-- **macvlan_vnc.sh**: Improved script that uses macvlan to link the physical interface to the namespace (recommended)
+- **macvlan_vnc.sh**: Script that uses macvlan to link the physical interface to the namespace for VNC
 - **nrt.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
-- **nrt_combined.py**: Enhanced version of nrt.py that more closely follows the original implementation with better OSPF handling
 
 ## Prerequisites
 
 - Linux system with network namespace support
 - FRR (Free Range Routing) installed
-- VNC server (either WayVNC or TigerVNC)
+- TigerVNC server
 - Python 3.6+ with required packages:
   - scapy
   - ipaddress
@@ -42,26 +39,21 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
    sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress
    ```
 
-   For WayVNC (requires Wayland):
-   ```
-   sudo apt install wayvnc weston
-   ```
-
-   OR for TigerVNC (more compatible with different systems):
+   For TigerVNC:
    ```
    sudo apt install tigervnc-standalone-server xterm
    ```
 
 3. Make the scripts executable:
    ```
-   chmod +x vnc_namespace.sh tigervnc_namespace.sh macvlan_vnc.sh nrt.py nrt_combined.py
+   chmod +x macvlan_vnc.sh nrt.py
    ```
 
 ## Configuration
 
-1. Edit the configuration in the VNC script you plan to use:
+1. Edit the configuration in the VNC script:
 
-   For `macvlan_vnc.sh` (Recommended):
+   For `macvlan_vnc.sh`:
    - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
    - `PHYSICAL_IFACE`: Physical interface to link to (default: "end0")
    - `MACVLAN_IFACE`: Name of the macvlan interface in the namespace (default: "macvlan0")
@@ -71,23 +63,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
    - `VNC_PORT`: VNC port (default: "5900", which is display :0)
    - `VNC_GEOMETRY`: Screen resolution (default: "1024x768")
 
-   For `vnc_namespace.sh` (WayVNC):
-   - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
-   - `VNC_IFACE`: Interface to move to VNC namespace (default: "end0")
-   - `VNC_IP`: IP address for VNC interface (default: "10.2.0.199")
-   - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
-   - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "10.2.0.1")
-
-   For `tigervnc_namespace.sh` (TigerVNC):
-   - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
-   - `VNC_IFACE`: Interface to move to VNC namespace (default: "end0")
-   - `VNC_IP`: IP address for VNC interface (default: "10.2.0.199")
-   - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
-   - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "10.2.0.1")
-   - `VNC_PORT`: VNC port (default: "5900", which is display :0)
-   - `VNC_GEOMETRY`: Screen resolution (default: "1024x768")
-
-2. Create a JSON configuration file for `nrt.py` or `nrt_combined.py`:
+2. Create a JSON configuration file for `nrt.py`:
    ```json
    {
      "frr_interface": "enxf0a731f41761",
@@ -106,8 +82,6 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 ## Usage
 
 ### Step 1: Start VNC Server in a Separate Namespace
-
-#### Option A: Using macvlan with TigerVNC (Recommended)
 
 Run the macvlan VNC script:
 ```
@@ -129,59 +103,11 @@ The macvlan approach has several advantages:
 - Allows for better connectivity between the namespace and the host
 - More flexible and less disruptive
 
-#### Option B: Using WayVNC (Wayland-based)
-
-Run the WayVNC namespace script:
-```
-sudo ./vnc_namespace.sh
-```
-
-This will:
-1. Create a network namespace called "vnc_ns"
-2. Move the specified interface (default: end0) to that namespace
-3. Configure the interface with the specified IP address
-4. Start Weston (Wayland compositor) in the namespace
-5. Start WayVNC server in the namespace
-6. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
-
-#### Option C: Using TigerVNC (X11-based, more compatible)
-
-Run the TigerVNC namespace script:
-```
-sudo ./tigervnc_namespace.sh
-```
-
-This will:
-1. Create a network namespace called "vnc_ns"
-2. Move the specified interface (default: end0) to that namespace
-3. Configure the interface with the specified IP address
-4. Start TigerVNC server in the namespace
-5. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
-
 You can connect to the VNC server using any VNC client at the IP address and port displayed when the script runs.
 
 ### Step 2: Run FRR Tests in the Default Namespace
 
-In a separate terminal, run the FRR tests using either nrt.py or nrt_combined.py:
-
-#### Option A: Using nrt_combined.py (Recommended)
-
-```
-sudo ./nrt_combined.py --config nrt_config.json
-```
-
-Or run interactively:
-```
-sudo ./nrt_combined.py
-```
-
-This version:
-- Uses vtysh commands directly for OSPF configuration
-- Actively waits for OSPF state Full/DR with a 30-second timeout
-- Adds the default route after OSPF has established
-- Uses the original DHCP and HTTPS testing methods
-
-#### Option B: Using nrt.py
+In a separate terminal, run the FRR tests:
 
 ```
 sudo ./nrt.py --config nrt_config.json
@@ -192,19 +118,21 @@ Or run interactively:
 sudo ./nrt.py
 ```
 
-Both scripts will:
+The script will:
 1. Configure the FRR interface (default: enxf0a731f41761) in the default namespace
 2. Add loopback interfaces
 3. Sniff for OSPF Hello packets
-4. Configure OSPF
-5. Run connectivity tests (ping, DNS, DHCP, RADIUS, NTP, HTTPS)
-6. Restore the original state when done
+4. Configure OSPF using vtysh commands directly
+5. Actively wait for OSPF state Full/DR with a 30-second timeout
+6. Add the default route after OSPF has established
+7. Run connectivity tests (ping, DNS, DHCP, RADIUS, NTP, HTTPS)
+8. Restore the original state when done
 
 ## Troubleshooting
 
 ### VNC Server Issues
 
-#### Macvlan Issues (Recommended Approach)
+#### Macvlan Issues
 
 - If you see "Operation not permitted" when creating the macvlan interface, make sure you're running the script as root
 - If you see "RTNETLINK answers: File exists" when creating the macvlan interface, it might already exist. Try removing it with: `sudo ip link del macvlan0`
@@ -220,24 +148,13 @@ Both scripts will:
   - If DNS is working: `sudo ip netns exec vnc_ns ping 8.8.8.8`
   - If the physical interface has internet connectivity
 
-#### WayVNC Issues
-
-- If WayVNC server fails to start in the namespace, check if it's already running in the default namespace
-- Verify that the VNC interface has the correct IP address and can reach the gateway
-- WayVNC requires a running Wayland compositor. The script sets XDG_RUNTIME_DIR and WAYLAND_DISPLAY environment variables, but you may need to:
-  - Install Weston if it's not already installed: `sudo apt install weston`
-  - If Weston is not available on your system, use the macvlan_vnc.sh script instead
-  - If using a different Wayland compositor, adjust the WAYLAND_DISPLAY value in the script
-- If you see errors about XDG_RUNTIME_DIR or WAYLAND_DISPLAY, the script attempts to set these up, but you may need to adjust them based on your system configuration
-- If you see "error in libwayland error in client communication", this usually indicates a problem with the Wayland compositor. Try using the macvlan_vnc.sh script instead.
-
 #### TigerVNC Issues
 
 - If TigerVNC server fails to start in the namespace, check if it's already running in the default namespace
 - Verify that the VNC interface has the correct IP address and can reach the gateway
 - If you see "Xvnc: command not found", install TigerVNC with: `sudo apt install tigervnc-standalone-server`
 - If you see "xterm: command not found", install xterm with: `sudo apt install xterm`
-- The script now tries multiple approaches to start TigerVNC:
+- The script tries multiple approaches to start TigerVNC:
   - Basic start with minimal options
   - With explicit interface binding
   - Using the vncserver script if available
