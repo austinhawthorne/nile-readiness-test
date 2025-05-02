@@ -325,7 +325,8 @@ print(f"{{pkt[IP].src}},{{pkt[OSPF_Hdr].area}},{{pkt[OSPF_Hello].hellointerval}}
     
     # Parse the output
     src, area, hi, di = result.stdout.strip().split(',')
-    return src, int(area), int(hi), int(di)
+    # Don't cast area to int as it can be in dotted notation (e.g., 0.0.0.0)
+    return src, area, int(hi), int(di)
 
 # Configure OSPF in namespace
 def configure_ospf_in_namespace(ns_name, iface, ip, prefix, m1, m2, client, up, area, hi, di):
