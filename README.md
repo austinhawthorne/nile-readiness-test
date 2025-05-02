@@ -11,6 +11,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 - **tigervnc_namespace.sh**: Alternative script that uses TigerVNC instead of WayVNC (more compatible with different systems)
 - **macvlan_vnc.sh**: Improved script that uses macvlan to link the physical interface to the namespace (recommended)
 - **nrt.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
+- **nrt_combined.py**: Enhanced version of nrt.py that more closely follows the original implementation with better OSPF handling
 
 ## Prerequisites
 
@@ -53,7 +54,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 
 3. Make the scripts executable:
    ```
-   chmod +x vnc_namespace.sh tigervnc_namespace.sh macvlan_vnc.sh nrt.py
+   chmod +x vnc_namespace.sh tigervnc_namespace.sh macvlan_vnc.sh nrt.py nrt_combined.py
    ```
 
 ## Configuration
@@ -86,7 +87,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
    - `VNC_PORT`: VNC port (default: "5900", which is display :0)
    - `VNC_GEOMETRY`: Screen resolution (default: "1024x768")
 
-2. Create a JSON configuration file for `nrt.py`:
+2. Create a JSON configuration file for `nrt.py` or `nrt_combined.py`:
    ```json
    {
      "frr_interface": "enxf0a731f41761",
@@ -161,7 +162,27 @@ You can connect to the VNC server using any VNC client at the IP address and por
 
 ### Step 2: Run FRR Tests in the Default Namespace
 
-In a separate terminal, run the FRR tests:
+In a separate terminal, run the FRR tests using either nrt.py or nrt_combined.py:
+
+#### Option A: Using nrt_combined.py (Recommended)
+
+```
+sudo ./nrt_combined.py --config nrt_config.json
+```
+
+Or run interactively:
+```
+sudo ./nrt_combined.py
+```
+
+This version:
+- Uses vtysh commands directly for OSPF configuration
+- Actively waits for OSPF state Full/DR with a 30-second timeout
+- Adds the default route after OSPF has established
+- Uses the original DHCP and HTTPS testing methods
+
+#### Option B: Using nrt.py
+
 ```
 sudo ./nrt.py --config nrt_config.json
 ```
@@ -171,7 +192,7 @@ Or run interactively:
 sudo ./nrt.py
 ```
 
-This will:
+Both scripts will:
 1. Configure the FRR interface (default: enxf0a731f41761) in the default namespace
 2. Add loopback interfaces
 3. Sniff for OSPF Hello packets

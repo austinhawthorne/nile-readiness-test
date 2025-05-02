@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-nrt.py - Configures OSPF adjacency dynamically, loopback interfaces, and runs
-connectivity tests (DHCP/RADIUS, NTP, HTTPS) on the enxf0a731f41761 interface
-in the default namespace.
+nrt.py - Configures host interface, OSPF adjacency dynamically,
+loopback interfaces, default route fallback, connectivity tests (DHCP/RADIUS,
+NTP, HTTPS), then restores host to original state (including removing FRR config,
+stopping FRR) and DNS changes.
 
-This approach allows RealVNC server to run in a separate namespace (vnc_ns) on end0
-while this script runs FRR tests on enxf0a731f41761 in the default namespace.
+This script runs in the default namespace and uses the specified interface for FRR tests,
+allowing VNC to run in a separate namespace on another interface.
 
 Usage: 
   sudo ./nrt.py [--debug] [--config CONFIG_FILE]
@@ -277,7 +278,7 @@ def sniff_ospf_hello(iface, timeout=60):
     # Don't cast area to int as it can be in dotted notation (e.g., 0.0.0.0)
     return src, area, int(hi), int(di)
 
-# Configure FRR and OSPF
+# Configure OSPF - using vtysh commands directly like the original
 def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
     
@@ -288,37 +289,27 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     with open('/etc/frr/daemons','w') as f:
         for l in lines: f.write('ospfd=yes\n' if l.startswith('ospfd=') else l+'\n')
     
-    # Create frr.conf file
-    frr_conf = f"""frr version 7.5
-frr defaults traditional
-hostname frr-nile
-log syslog
-service integrated-vtysh-config
-!
-router ospf
- network {ip}/{prefix} area {area}
- network {n1.network_address}/{n1.prefixlen} area {area}
- network {n2.network_address}/{n2.prefixlen} area {area}
- network {n3.network_address}/{n3.prefixlen} area {area}
-!
-interface {iface}
- ip ospf hello-interval {hi}
- ip ospf dead-interval {di}
-!
-line vty
-!
-end
-"""
-    with open('/etc/frr/frr.conf', 'w') as f:
-        f.write(frr_conf)
-    
     # Restart FRR
     print("Restarting FRR...")
-    run_cmd(['systemctl', 'restart', 'frr'], check=False)
+    run_cmd(['systemctl', 'restart', 'frr'], check=True)
     
     # Wait for FRR to start
     print("Waiting for FRR to start...")
     time.sleep(5)
+    
+    # Configure OSPF using vtysh commands
+    cmds=[
+        'vtysh','-c','configure terminal','-c','router ospf',
+        '-c',f'network {ip}/{prefix} area {area}',
+        '-c',f'network {n1.network_address}/{n1.prefixlen} area {area}',
+        '-c',f'network {n2.network_address}/{n2.prefixlen} area {area}',
+        '-c',f'network {n3.network_address}/{n3.prefixlen} area {area}',
+        '-c','exit','-c',f'interface {iface}',
+        '-c',f'ip ospf hello-interval {hi}',
+        '-c',f'ip ospf dead-interval {di}',
+        '-c','exit','-c','end','-c','write memory'
+    ]
+    run_cmd(cmds, check=True)
     
     # Add route to upstream router
     run_cmd(['ip', 'route', 'add', up, 'via', up, 'dev', iface], check=False)
@@ -338,18 +329,23 @@ end
         print("Warning: OSPF may not work correctly without connectivity to the upstream router")
     
     print("OSPF configuration complete")
-    
-    # Wait for OSPF to establish relationship (30 seconds)
-    print("Waiting 30 seconds for OSPF to establish relationship...")
-    time.sleep(30)
-    
-    # Add a default route via the upstream router after OSPF has had time to establish
-    print("Adding default route via upstream router")
-    run_cmd(['ip', 'route', 'add', 'default', 'via', up, 'dev', iface], check=False)
 
-# Check OSPF status and connectivity
+# Show OSPF state Full/DR - using the original approach with active waiting
 def show_ospf_status():
-    print(f'\n=== Checking OSPF status and connectivity ===')
+    print('\n=== Waiting for OSPF state Full/DR (30s timeout) ===')
+    success = False
+    for _ in range(30):
+        out = run_cmd(['vtysh','-c','show ip ospf neighbor'], capture_output=True, text=True).stdout
+        if any('Full/DR' in l for l in out.splitlines()[1:]):
+            success = True
+            print('OSPF reached Full/DR state')
+            break
+        time.sleep(1)
+    if not success:
+        print('OSPF never reached Full/DR state after 30s')
+    
+    # Wait a bit more to ensure stability
+    time.sleep(5)
     
     # Show the routing table from FRR
     print("\n=== FRR Routing Table ===")
@@ -361,33 +357,19 @@ def show_ospf_status():
     route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
     print(route_output)
     
-    # Check OSPF neighbor status
-    print("\n=== OSPF Neighbor Status ===")
-    ospf_neighbors = run_cmd(['vtysh', '-c', 'show ip ospf neighbor'], capture_output=True, text=True).stdout
-    print(ospf_neighbors)
-    
-    # Check if we have a Full/DR state
-    success = 'Full/DR' in ospf_neighbors
-    
-    # Check connectivity to the gateway
-    # Extract the gateway IP from the default route
+    # Add a default route via the upstream router after OSPF has had time to establish
+    print("Adding default route via upstream router")
     gateway_ip = None
     for line in route_output.splitlines():
-        if line.startswith('default'):
+        if 'via' in line and not line.startswith('default'):
             parts = line.split()
             if 'via' in parts:
                 gateway_ip = parts[parts.index('via') + 1]
                 break
     
     if gateway_ip:
-        print(f"\nTesting connectivity to gateway {gateway_ip}")
-        ping_result = run_cmd(['ping', '-c', '4', gateway_ip], capture_output=True)
-        ping_success = ping_result.returncode == 0
-        print(f"Gateway connectivity: {GREEN+'Success'+RESET if ping_success else RED+'Fail'+RESET}")
-    else:
-        print("\nCould not determine gateway IP from routing table")
-    
-    print("\nOSPF test: " + (GREEN+'Success'+RESET if success else RED+'Fail'+RESET))
+        run_cmd(['ip', 'route', 'add', 'default', 'via', gateway_ip], check=False)
+        print(f"Added default route via {gateway_ip}")
     
     return success
 
@@ -399,6 +381,14 @@ def configure_static_route(gateway,iface):
 def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
     # Set initial DNS
     dns_servers = ['8.8.8.8', '8.8.4.4']
+    
+    # Write DNS servers to resolv.conf
+    def write_resolv(servers):
+        with open('/etc/resolv.conf','w') as f:
+            for s in servers:
+                f.write(f'nameserver {s}\n')
+    write_resolv(dns_servers)
+    conf.route.resync()
     
     # Initial connectivity
     ping_ok = dns_ok = False
@@ -425,6 +415,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             sys.exit(1)
         new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
         dns_servers = [s.strip() for s in new_dns.split(',')]
+        write_resolv(dns_servers)
 
     if not ping_ok:
         print('Initial ping tests failed. Exiting.')
@@ -440,7 +431,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
-    # DHCP relay with ping pre-check
+    # DHCP relay with ping pre-check - using scapy like the original
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
@@ -450,23 +441,26 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Use a simpler approach for DHCP testing
-            # Instead of using scapy, we'll use dhcping which is more reliable
-            # If dhcping is not available, we'll fall back to a basic UDP port check
-            
-            # First try dhcping if available
-            dhcping_available = run_cmd(['which', 'dhcping'], capture_output=True).returncode == 0
-            
-            if dhcping_available:
-                # Use dhcping for DHCP testing
-                result = run_cmd(['dhcping', '-s', srv, '-v'], capture_output=True, text=True)
-                success = result.returncode == 0
-            else:
-                # Fall back to a basic UDP port check
-                # This just checks if the DHCP server port is open and responding
-                result = run_cmd(['nc', '-zvu', srv, '67', '-w', '5'], capture_output=True, text=True)
-                success = result.returncode == 0
-            print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if success else RED+'Fail'+RESET))
+            # Use scapy to craft and send DHCP packets
+            xid = random.randint(1, 0xffffffff)
+            pkt = (Ether(dst='ff:ff:ff:ff:ff:ff')/
+                  IP(src=helper_ip, dst=srv)/
+                  UDP(sport=67, dport=67)/
+                  BOOTP(op=1, chaddr=RandMAC(), xid=xid, giaddr=helper_ip)/
+                  DHCP(options=[('message-type','discover'), ('end')]))
+            if DEBUG:
+                print('DEBUG: DHCP DISCOVER summary:')
+                print(pkt.summary())
+            sendp(pkt, iface=iface, verbose=False)
+            resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
+                        timeout=10, count=1,
+                        lfilter=lambda p: p.haslayer(BOOTP)
+                                      and p[BOOTP].xid==xid
+                                      and p[BOOTP].op==2)
+            if DEBUG:
+                print(f'DEBUG: DHCP response count: {len(resp)}')
+                for p in resp: print(p.summary())
+            print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if resp else RED+'Fail'+RESET))
     else:
         print('Skipping DHCP tests')
 
@@ -491,33 +485,19 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
         r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
         print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
 
-    # HTTPS
+    # HTTPS - using socket.create_connection like the original
     print(f'=== HTTPS tests ===')
     for url in ('https://u1.nilesecure.com',
                 'https://ne-u1.nile-global.cloud',
                 'https://s3.us-west-2.amazonaws.com/nile-prod-us-west-2'):
         parsed = urlparse(url)
         host, port = parsed.hostname, parsed.port or 443
-        
-        # First try a simple TCP connection to the host:port
         try:
-            # Use nc to check if the port is open
-            r = run_cmd(['nc', '-z', '-w', '5', host, str(port)], capture_output=True)
-            tcp_ok = r.returncode == 0
-            
-            if tcp_ok:
-                # If TCP connection works, try curl with more options
-                r = run_cmd(['curl', '-s', '-k', '--connect-timeout', '10', '-o', '/dev/null', '-w', '%{http_code}', url], 
-                    capture_output=True, text=True)
-                ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
-            else:
-                ok = False
-                
-        except Exception as e:
-            if DEBUG:
-                print(f"DEBUG: HTTPS test exception: {e}")
+            sock = socket.create_connection((host, port), timeout=5)
+            sock.close()
+            ok = True
+        except:
             ok = False
-            
         print(f'HTTPS {url}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
 # Main flow
