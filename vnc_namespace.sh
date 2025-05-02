@@ -65,16 +65,22 @@ chmod 700 /tmp/xdg-runtime-$VNC_NS
 export XDG_RUNTIME_DIR=/tmp/xdg-runtime-$VNC_NS
 export WAYLAND_DISPLAY=wayland-1
 
-# Start Weston (Wayland compositor) in the namespace
-echo "Starting Weston in namespace $VNC_NS"
-ip netns exec $VNC_NS \
-  env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
-  weston --backend=headless-backend.so \
-  --socket=$WAYLAND_DISPLAY \
-  --no-config &
+# Check if Weston is available
+if command -v weston >/dev/null 2>&1; then
+  # Start Weston (Wayland compositor) in the namespace
+  echo "Starting Weston in namespace $VNC_NS"
+  ip netns exec $VNC_NS \
+    env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+    weston --backend=headless-backend.so \
+    --socket=$WAYLAND_DISPLAY \
+    --no-config &
 
-# Wait for Weston to start
-sleep 2
+  # Wait for Weston to start
+  sleep 2
+else
+  echo "Weston not found. Attempting to start WayVNC without a compositor."
+  echo "If WayVNC fails, please install Weston with: sudo apt install weston"
+fi
 
 # Start WayVNC server in the namespace
 echo "Starting WayVNC server in namespace $VNC_NS"

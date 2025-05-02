@@ -36,7 +36,12 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 2. Install required packages:
    ```
    sudo apt update
-   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress wayvnc weston
+   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress wayvnc
+   ```
+
+   Optionally, install Weston (recommended for WayVNC):
+   ```
+   sudo apt install weston
    ```
 
 3. Make the scripts executable:
@@ -113,8 +118,10 @@ This will:
 - If WayVNC server fails to start in the namespace, check if it's already running in the default namespace
 - Verify that the VNC interface has the correct IP address and can reach the gateway
 - WayVNC requires a running Wayland compositor. The script sets XDG_RUNTIME_DIR and WAYLAND_DISPLAY environment variables, but you may need to:
-  - Ensure a Wayland compositor (like Weston) is running in the namespace
+  - Install Weston if it's not already installed: `sudo apt install weston`
+  - If Weston is not available on your system, you may need to use a different VNC server like TigerVNC or x11vnc
   - If using a different Wayland compositor, adjust the WAYLAND_DISPLAY value in the script
+- If you see errors about XDG_RUNTIME_DIR or WAYLAND_DISPLAY, the script attempts to set these up, but you may need to adjust them based on your system configuration
 
 ### FRR Test Issues
 
