@@ -328,24 +328,64 @@ print(f"{{pkt[IP].src}},{{pkt[OSPF_Hdr].area}},{{pkt[OSPF_Hello].hellointerval}}
     # Don't cast area to int as it can be in dotted notation (e.g., 0.0.0.0)
     return src, area, int(hi), int(di)
 
-# Configure OSPF with proper bidirectional routing
+# Configure FRR and OSPF within the namespace
 def configure_ospf_in_namespace(ns_name, iface, ip, prefix, m1, m2, client, up, area, hi, di):
     n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
     
-    print(f"Configuring OSPF for interface {iface} in namespace {ns_name}")
+    print(f"Configuring FRR and OSPF within namespace {ns_name} for interface {iface}")
     
-    # First, configure FRR in the default namespace
-    print("Configuring FRR in the default namespace")
+    # Create directories for FRR in the namespace
+    run_cmd(['mkdir', '-p', f'/etc/netns/{ns_name}/frr'], check=False)
     
-    # Enable ospfd in daemons file
-    lines=open('/etc/frr/daemons').read().splitlines()
-    with open('/etc/frr/daemons','w') as f:
-        for l in lines: f.write('ospfd=yes\n' if l.startswith('ospfd=') else l+'\n')
+    # Create daemons file in the namespace
+    daemons_content = """
+zebra=yes
+bgpd=no
+ospfd=yes
+ospf6d=no
+ripd=no
+ripngd=no
+isisd=no
+pimd=no
+ldpd=no
+nhrpd=no
+eigrpd=no
+babeld=no
+sharpd=no
+pbrd=no
+bfdd=no
+fabricd=no
+vrrpd=no
+pathd=no
+
+vtysh_enable=yes
+zebra_options="  -A 127.0.0.1 -s 90000000"
+bgpd_options="   -A 127.0.0.1"
+ospfd_options="  -A 127.0.0.1"
+ospf6d_options=" -A ::1"
+ripd_options="   -A 127.0.0.1"
+ripngd_options=" -A ::1"
+isisd_options="  -A 127.0.0.1"
+pimd_options="   -A 127.0.0.1"
+ldpd_options="   -A 127.0.0.1"
+nhrpd_options="  -A 127.0.0.1"
+eigrpd_options=" -A 127.0.0.1"
+babeld_options=" -A 127.0.0.1"
+sharpd_options=" -A 127.0.0.1"
+pbrd_options="   -A 127.0.0.1"
+staticd_options="-A 127.0.0.1"
+bfdd_options="   -A 127.0.0.1"
+fabricd_options="-A 127.0.0.1"
+vrrpd_options="  -A 127.0.0.1"
+pathd_options="  -A 127.0.0.1"
+"""
+    with open(f'/etc/netns/{ns_name}/frr/daemons', 'w') as f:
+        f.write(daemons_content)
     
-    # Create frr.conf file
+    # Create frr.conf file in the namespace
     frr_conf = f"""frr version 7.5
 frr defaults traditional
-hostname frr-nile
+hostname frr-{ns_name}
 log syslog
 service integrated-vtysh-config
 !
@@ -363,27 +403,52 @@ line vty
 !
 end
 """
-    with open('/etc/frr/frr.conf', 'w') as f:
+    with open(f'/etc/netns/{ns_name}/frr/frr.conf', 'w') as f:
         f.write(frr_conf)
     
-    # Restart FRR
-    run_cmd(['systemctl', 'restart', 'frr'], check=False)
+    # Create vtysh.conf file in the namespace
+    with open(f'/etc/netns/{ns_name}/frr/vtysh.conf', 'w') as f:
+        f.write(f"hostname frr-{ns_name}\n")
+    
+    # Set proper permissions
+    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/frr.conf'], check=False)
+    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/vtysh.conf'], check=False)
+    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/daemons'], check=False)
+    
+    # Create directories for FRR to run in the namespace
+    run_cmd(['mkdir', '-p', f'/var/run/netns/{ns_name}/frr'], check=False)
+    
+    # Start FRR in the namespace
+    print(f"Starting FRR daemons in namespace {ns_name}")
+    
+    # Create a script to start FRR in the namespace
+    start_script = f"""#!/bin/bash
+# Set environment variables
+export FRR_NAMESPACE={ns_name}
+export FRR_PATHSPACE={ns_name}
+export FRR_CONFDIR=/etc/netns/{ns_name}/frr
+export FRR_VTYDIR=/etc/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+
+# Start FRR daemons in the namespace
+ip netns exec {ns_name} /usr/lib/frr/zebra -d -N {ns_name} -f $FRR_CONFDIR/frr.conf
+ip netns exec {ns_name} /usr/lib/frr/ospfd -d -N {ns_name} -f $FRR_CONFDIR/frr.conf
+"""
+    with open('/tmp/start_frr.sh', 'w') as f:
+        f.write(start_script)
+    
+    run_cmd(['chmod', '+x', '/tmp/start_frr.sh'], check=True)
+    run_cmd(['/tmp/start_frr.sh'], check=False)
     
     # Wait for FRR to start
-    print("Waiting for FRR to start...")
+    print("Waiting for FRR daemons to start...")
     time.sleep(5)
-    
-    # Now set up routes in the namespace
-    print(f"Setting up routes in namespace {ns_name}")
     
     # Add route to upstream router
     run_in_namespace(ns_name, ['ip', 'route', 'add', up, 'via', up, 'dev', iface], check=False)
     
     # Add a default route via the upstream router
     run_in_namespace(ns_name, ['ip', 'route', 'add', 'default', 'via', up, 'dev', iface], check=False)
-    
-    # Add routes for the loopback networks
-    # These are already directly connected, so we don't need to add routes
     
     # Show the routing table
     route_output = run_in_namespace(ns_name, ['ip', 'route'], capture_output=True, text=True).stdout
@@ -399,38 +464,35 @@ end
         print(f"Connectivity to upstream router {up}: {RED}Fail{RESET}")
         print("Warning: OSPF may not work correctly without connectivity to the upstream router")
     
-    # Now configure the loopback interfaces to be advertised via OSPF
-    # This is done by adding them to the FRR configuration
-    
-    # Create a script to add the loopback interfaces to OSPF
-    ospf_script = f"""#!/bin/bash
-vtysh -c 'configure terminal' \\
-      -c 'router ospf' \\
-      -c 'network {n1.network_address}/{n1.prefixlen} area {area}' \\
-      -c 'network {n2.network_address}/{n2.prefixlen} area {area}' \\
-      -c 'network {n3.network_address}/{n3.prefixlen} area {area}' \\
-      -c 'exit' \\
-      -c 'end' \\
-      -c 'write memory'
-"""
-    with open('/tmp/ospf_config.sh', 'w') as f:
-        f.write(ospf_script)
-    
-    run_cmd(['chmod', '+x', '/tmp/ospf_config.sh'], check=True)
-    run_cmd(['/tmp/ospf_config.sh'], check=False)
-    
     # Clean up
-    run_cmd(['rm', '/tmp/ospf_config.sh'], check=False)
+    run_cmd(['rm', '/tmp/start_frr.sh'], check=False)
     
     print("OSPF configuration complete")
 
 # Check OSPF status and connectivity
 def show_ospf_status_in_namespace(ns_name):
-    print(f'\n=== Checking OSPF status and connectivity ===')
+    print(f'\n=== Checking OSPF status and connectivity in namespace {ns_name} ===')
     
-    # Show the routing table from FRR
-    print("\n=== FRR Routing Table ===")
-    frr_routes = run_cmd(['vtysh', '-c', 'show ip route'], capture_output=True, text=True).stdout
+    # Create a script to run vtysh in the namespace
+    vtysh_script = f"""#!/bin/bash
+# Set environment variables
+export FRR_NAMESPACE={ns_name}
+export FRR_PATHSPACE={ns_name}
+export FRR_CONFDIR=/etc/netns/{ns_name}/frr
+export FRR_VTYDIR=/etc/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+
+# Run vtysh in the namespace
+ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip route'
+"""
+    with open('/tmp/vtysh_route.sh', 'w') as f:
+        f.write(vtysh_script)
+    
+    run_cmd(['chmod', '+x', '/tmp/vtysh_route.sh'], check=True)
+    
+    # Show the routing table from FRR in the namespace
+    print("\n=== FRR Routing Table in namespace {ns_name} ===")
+    frr_routes = run_cmd(['/tmp/vtysh_route.sh'], capture_output=True, text=True).stdout
     print(frr_routes)
     
     # Show the kernel routing table in the namespace
@@ -438,10 +500,30 @@ def show_ospf_status_in_namespace(ns_name):
     route_output = run_in_namespace(ns_name, ['ip', 'route'], capture_output=True, text=True).stdout
     print(route_output)
     
-    # Check OSPF neighbor status
-    print("\n=== OSPF Neighbor Status ===")
-    ospf_neighbors = run_cmd(['vtysh', '-c', 'show ip ospf neighbor'], capture_output=True, text=True).stdout
+    # Create a script to check OSPF neighbor status in the namespace
+    vtysh_neighbor_script = f"""#!/bin/bash
+# Set environment variables
+export FRR_NAMESPACE={ns_name}
+export FRR_PATHSPACE={ns_name}
+export FRR_CONFDIR=/etc/netns/{ns_name}/frr
+export FRR_VTYDIR=/etc/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+
+# Run vtysh in the namespace
+ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip ospf neighbor'
+"""
+    with open('/tmp/vtysh_neighbor.sh', 'w') as f:
+        f.write(vtysh_neighbor_script)
+    
+    run_cmd(['chmod', '+x', '/tmp/vtysh_neighbor.sh'], check=True)
+    
+    # Check OSPF neighbor status in the namespace
+    print("\n=== OSPF Neighbor Status in namespace {ns_name} ===")
+    ospf_neighbors = run_cmd(['/tmp/vtysh_neighbor.sh'], capture_output=True, text=True).stdout
     print(ospf_neighbors)
+    
+    # Clean up
+    run_cmd(['rm', '/tmp/vtysh_route.sh', '/tmp/vtysh_neighbor.sh'], check=False)
     
     # Check if we have a Full/DR state
     success = 'Full/DR' in ospf_neighbors
