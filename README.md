@@ -8,8 +8,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 ## Scripts
 
 - **vnc_namespace.sh**: Creates a network namespace for RealVNC server and moves the specified interface to that namespace
-- **nrt_default.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
-- **nrt.py**: Original script that uses network namespaces for FRR tests (not recommended with this approach)
+- **nrt.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
 
 ## Prerequisites
 
@@ -42,7 +41,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 
 3. Make the scripts executable:
    ```
-   chmod +x vnc_namespace.sh nrt_default.py
+   chmod +x vnc_namespace.sh nrt.py
    ```
 
 ## Configuration
@@ -54,7 +53,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
    - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
    - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "192.168.1.1")
 
-2. Create a JSON configuration file for `nrt_default.py`:
+2. Create a JSON configuration file for `nrt.py`:
    ```json
    {
      "frr_interface": "enxf0a731f41761",
@@ -90,12 +89,12 @@ This will:
 
 In a separate terminal, run the FRR tests:
 ```
-sudo ./nrt_default.py --config config.json
+sudo ./nrt.py --config nrt_config.json
 ```
 
 Or run interactively:
 ```
-sudo ./nrt_default.py
+sudo ./nrt.py
 ```
 
 This will:

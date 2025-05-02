@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-nrt.py - Configures host interface, OSPF adjacency dynamically,
-loopback interfaces, default route fallback, connectivity tests (DHCP/RADIUS,
-NTP, HTTPS), then restores host to original state (including removing FRR config,
-stopping FRR) and DNS changes.
+nrt.py - Configures OSPF adjacency dynamically, loopback interfaces, and runs
+connectivity tests (DHCP/RADIUS, NTP, HTTPS) on the enxf0a731f41761 interface
+in the default namespace.
 
-This script uses network namespaces to isolate enxf0a731f41761 for FRR tests while keeping
-end0 available for normal Raspberry Pi services.
+This approach allows RealVNC server to run in a separate namespace (vnc_ns) on end0
+while this script runs FRR tests on enxf0a731f41761 in the default namespace.
 
 Usage: 
   sudo ./nrt.py [--debug] [--config CONFIG_FILE]
@@ -31,36 +30,6 @@ from scapy.config import conf
 from scapy.all import sniff, sendp, RandMAC, Ether, BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
-
-# Network namespace constants
-FRR_NS = "frr_ns"  # Namespace for FRR tests
-
-# Network namespace management functions
-def create_namespace(ns_name):
-    """Create a network namespace if it doesn't exist"""
-    print(f"Creating network namespace: {ns_name}")
-    run_cmd(['ip', 'netns', 'add', ns_name], check=False)
-    # Create loopback interface in the namespace
-    run_cmd(['ip', 'netns', 'exec', ns_name, 'ip', 'link', 'set', 'lo', 'up'], check=False)
-    return True
-
-def delete_namespace(ns_name):
-    """Delete a network namespace"""
-    print(f"Deleting network namespace: {ns_name}")
-    run_cmd(['ip', 'netns', 'delete', ns_name], check=False)
-    return True
-
-def move_interface_to_namespace(iface, ns_name):
-    """Move a network interface to a namespace"""
-    print(f"Moving interface {iface} to namespace {ns_name}")
-    run_cmd(['ip', 'link', 'set', iface, 'netns', ns_name], check=True)
-    run_cmd(['ip', 'netns', 'exec', ns_name, 'ip', 'link', 'set', iface, 'up'], check=True)
-    return True
-
-def run_in_namespace(ns_name, cmd, **kwargs):
-    """Run a command in a network namespace"""
-    ns_cmd = ['ip', 'netns', 'exec', ns_name] + (cmd if isinstance(cmd, list) else [cmd])
-    return run_cmd(ns_cmd, **kwargs)
 
 # Parse command line arguments
 def parse_args():
@@ -208,7 +177,6 @@ def get_user_input(config_file=None):
         # Interactive mode
         print("\nNetwork Interface Configuration:")
         print("--------------------------------")
-        print("end0 will be kept for normal Raspberry Pi services")
         frr_iface     = prompt_nonempty('Interface for FRR tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
         ip_addr       = prompt_nonempty('IP address for FRR interface: ')
         netmask       = prompt_nonempty('Netmask (e.g. 255.255.255.0): ')
@@ -288,104 +256,42 @@ def add_loopbacks(m1,m2,client):
         run_cmd(['ip','link','set','dev',iface,'up'], check=True)
         print(f'Loopback {iface} → {addr}/{prefix}')
 
-# OSPF Hello sniff in namespace
-def sniff_ospf_hello_in_namespace(ns_name, iface, timeout=60):
-    print(f'Waiting for OSPF Hello on {iface} in namespace {ns_name}...')
+# OSPF Hello sniff
+def sniff_ospf_hello(iface, timeout=60):
+    print(f'Waiting for OSPF Hello on {iface}...')
     
-    # Since scapy doesn't directly support namespaces, we'll use a workaround
-    # We'll create a temporary script to run scapy in the namespace
-    script_content = f"""#!/usr/bin/env python3
-import sys
-from scapy.all import sniff, IP
-from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
-
-pkts = sniff(iface='{iface}', filter='ip proto 89', timeout={timeout}, count=1)
-if not pkts:
-    sys.exit(1)
-pkt = pkts[0]
-print(f"{{pkt[IP].src}},{{pkt[OSPF_Hdr].area}},{{pkt[OSPF_Hello].hellointerval}},{{pkt[OSPF_Hello].deadinterval}}")
-"""
-    
-    # Write the script to a temporary file
-    with open('/tmp/ospf_sniff.py', 'w') as f:
-        f.write(script_content)
-    
-    # Make it executable
-    run_cmd(['chmod', '+x', '/tmp/ospf_sniff.py'], check=True)
-    
-    # Run the script in the namespace
-    result = run_in_namespace(ns_name, ['python3', '/tmp/ospf_sniff.py'], capture_output=True, text=True)
-    
-    # Clean up
-    run_cmd(['rm', '/tmp/ospf_sniff.py'], check=False)
-    
-    if result.returncode != 0:
+    # Use scapy to sniff for OSPF Hello packets
+    pkts = sniff(iface=iface, filter='ip proto 89', timeout=timeout, count=1)
+    if not pkts:
         print('No OSPF Hello received; aborting.')
         sys.exit(1)
     
-    # Parse the output
-    src, area, hi, di = result.stdout.strip().split(',')
+    pkt = pkts[0]
+    src = pkt[IP].src
+    area = pkt[OSPF_Hdr].area
+    hi = pkt[OSPF_Hello].hellointerval
+    di = pkt[OSPF_Hello].deadinterval
+    
+    print(f"Received OSPF Hello from {src} (Area: {area}, Hello: {hi}s, Dead: {di}s)")
+    
     # Don't cast area to int as it can be in dotted notation (e.g., 0.0.0.0)
     return src, area, int(hi), int(di)
 
-# Configure FRR and OSPF within the namespace
-def configure_ospf_in_namespace(ns_name, iface, ip, prefix, m1, m2, client, up, area, hi, di):
+# Configure FRR and OSPF
+def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
     
-    print(f"Configuring FRR and OSPF within namespace {ns_name} for interface {iface}")
+    print(f"Configuring FRR and OSPF for interface {iface}")
     
-    # Create directories for FRR in the namespace
-    run_cmd(['mkdir', '-p', f'/etc/netns/{ns_name}/frr'], check=False)
+    # Enable ospfd in daemons file
+    lines=open('/etc/frr/daemons').read().splitlines()
+    with open('/etc/frr/daemons','w') as f:
+        for l in lines: f.write('ospfd=yes\n' if l.startswith('ospfd=') else l+'\n')
     
-    # Create daemons file in the namespace
-    daemons_content = """
-zebra=yes
-bgpd=no
-ospfd=yes
-ospf6d=no
-ripd=no
-ripngd=no
-isisd=no
-pimd=no
-ldpd=no
-nhrpd=no
-eigrpd=no
-babeld=no
-sharpd=no
-pbrd=no
-bfdd=no
-fabricd=no
-vrrpd=no
-pathd=no
-
-vtysh_enable=yes
-zebra_options="  -A 127.0.0.1 -s 90000000"
-bgpd_options="   -A 127.0.0.1"
-ospfd_options="  -A 127.0.0.1"
-ospf6d_options=" -A ::1"
-ripd_options="   -A 127.0.0.1"
-ripngd_options=" -A ::1"
-isisd_options="  -A 127.0.0.1"
-pimd_options="   -A 127.0.0.1"
-ldpd_options="   -A 127.0.0.1"
-nhrpd_options="  -A 127.0.0.1"
-eigrpd_options=" -A 127.0.0.1"
-babeld_options=" -A 127.0.0.1"
-sharpd_options=" -A 127.0.0.1"
-pbrd_options="   -A 127.0.0.1"
-staticd_options="-A 127.0.0.1"
-bfdd_options="   -A 127.0.0.1"
-fabricd_options="-A 127.0.0.1"
-vrrpd_options="  -A 127.0.0.1"
-pathd_options="  -A 127.0.0.1"
-"""
-    with open(f'/etc/netns/{ns_name}/frr/daemons', 'w') as f:
-        f.write(daemons_content)
-    
-    # Create frr.conf file in the namespace
+    # Create frr.conf file
     frr_conf = f"""frr version 7.5
 frr defaults traditional
-hostname frr-{ns_name}
+hostname frr-nile
 log syslog
 service integrated-vtysh-config
 !
@@ -403,147 +309,57 @@ line vty
 !
 end
 """
-    with open(f'/etc/netns/{ns_name}/frr/frr.conf', 'w') as f:
+    with open('/etc/frr/frr.conf', 'w') as f:
         f.write(frr_conf)
     
-    # Create vtysh.conf file in the namespace
-    with open(f'/etc/netns/{ns_name}/frr/vtysh.conf', 'w') as f:
-        f.write(f"hostname frr-{ns_name}\n")
-    
-    # Set proper permissions
-    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/frr.conf'], check=False)
-    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/vtysh.conf'], check=False)
-    run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/daemons'], check=False)
-    
-    # Create directories for FRR to run in the namespace
-    # We need to create the proper directory structure for PID files
-    run_cmd(['mkdir', '-p', f'/var/run/frr/{ns_name}'], check=False)
-    run_cmd(['chmod', '755', f'/var/run/frr/{ns_name}'], check=False)
-    
-    # Start FRR in the namespace
-    print(f"Starting FRR daemons in namespace {ns_name}")
-    
-    # Create a script to start FRR in the namespace with additional safeguards
-    start_script = f"""#!/bin/bash
-# Set environment variables
-export FRR_NAMESPACE={ns_name}
-export FRR_PATHSPACE={ns_name}
-export FRR_CONFDIR=/etc/netns/{ns_name}/frr
-export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/frr/{ns_name}
-
-# Make sure the run directory exists and has proper permissions
-mkdir -p /var/run/frr/{ns_name}
-chmod 755 /var/run/frr/{ns_name}
-
-# Clean up any existing PID files that might cause conflicts
-rm -f /var/run/frr/{ns_name}/zebra.pid
-rm -f /var/run/frr/{ns_name}/ospfd.pid
-
-# Start zebra first
-echo "Starting zebra in namespace {ns_name}..."
-ip netns exec {ns_name} /usr/lib/frr/zebra -d -N {ns_name} -f $FRR_CONFDIR/frr.conf -i /var/run/frr/{ns_name}/zebra.pid
-sleep 5  # Give zebra time to fully initialize
-
-# Now start ospfd
-echo "Starting ospfd in namespace {ns_name}..."
-ip netns exec {ns_name} /usr/lib/frr/ospfd -d -N {ns_name} -f $FRR_CONFDIR/frr.conf -i /var/run/frr/{ns_name}/ospfd.pid
-
-# Verify daemons are running
-echo "Verifying FRR daemons are running..."
-ps aux | grep "zebra -d -N {ns_name}" | grep -v grep
-ps aux | grep "ospfd -d -N {ns_name}" | grep -v grep
-"""
-    with open('/tmp/start_frr.sh', 'w') as f:
-        f.write(start_script)
-    
-    run_cmd(['chmod', '+x', '/tmp/start_frr.sh'], check=True)
-    run_cmd(['/tmp/start_frr.sh'], check=False)
+    # Restart FRR
+    print("Restarting FRR...")
+    run_cmd(['systemctl', 'restart', 'frr'], check=False)
     
     # Wait for FRR to start
-    print("Waiting for FRR daemons to start...")
+    print("Waiting for FRR to start...")
     time.sleep(5)
     
     # Add route to upstream router
-    run_in_namespace(ns_name, ['ip', 'route', 'add', up, 'via', up, 'dev', iface], check=False)
+    run_cmd(['ip', 'route', 'add', up, 'via', up, 'dev', iface], check=False)
     
     # Add a default route via the upstream router
-    run_in_namespace(ns_name, ['ip', 'route', 'add', 'default', 'via', up, 'dev', iface], check=False)
+    run_cmd(['ip', 'route', 'add', 'default', 'via', up, 'dev', iface], check=False)
     
     # Show the routing table
-    route_output = run_in_namespace(ns_name, ['ip', 'route'], capture_output=True, text=True).stdout
-    print("Current routing table in namespace:")
+    route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
+    print("Current routing table:")
     print(route_output)
     
     # Check connectivity to the upstream router
     print(f"Testing connectivity to upstream router {up}")
-    ping_result = run_in_namespace(ns_name, ['ping', '-c', '4', up], capture_output=True)
+    ping_result = run_cmd(['ping', '-c', '4', up], capture_output=True)
     if ping_result.returncode == 0:
         print(f"Connectivity to upstream router {up}: {GREEN}Success{RESET}")
     else:
         print(f"Connectivity to upstream router {up}: {RED}Fail{RESET}")
         print("Warning: OSPF may not work correctly without connectivity to the upstream router")
     
-    # Clean up
-    run_cmd(['rm', '/tmp/start_frr.sh'], check=False)
-    
     print("OSPF configuration complete")
 
 # Check OSPF status and connectivity
-def show_ospf_status_in_namespace(ns_name):
-    print(f'\n=== Checking OSPF status and connectivity in namespace {ns_name} ===')
+def show_ospf_status():
+    print(f'\n=== Checking OSPF status and connectivity ===')
     
-    # Create a script to run vtysh in the namespace
-    vtysh_script = f"""#!/bin/bash
-# Set environment variables
-export FRR_NAMESPACE={ns_name}
-export FRR_PATHSPACE={ns_name}
-export FRR_CONFDIR=/etc/netns/{ns_name}/frr
-export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/frr/{ns_name}
-
-# Run vtysh in the namespace
-ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip route'
-"""
-    with open('/tmp/vtysh_route.sh', 'w') as f:
-        f.write(vtysh_script)
-    
-    run_cmd(['chmod', '+x', '/tmp/vtysh_route.sh'], check=True)
-    
-    # Show the routing table from FRR in the namespace
-    print("\n=== FRR Routing Table in namespace {ns_name} ===")
-    frr_routes = run_cmd(['/tmp/vtysh_route.sh'], capture_output=True, text=True).stdout
+    # Show the routing table from FRR
+    print("\n=== FRR Routing Table ===")
+    frr_routes = run_cmd(['vtysh', '-c', 'show ip route'], capture_output=True, text=True).stdout
     print(frr_routes)
     
-    # Show the kernel routing table in the namespace
-    print(f'\n=== Kernel Routing Table in namespace {ns_name} ===')
-    route_output = run_in_namespace(ns_name, ['ip', 'route'], capture_output=True, text=True).stdout
+    # Show the kernel routing table
+    print(f'\n=== Kernel Routing Table ===')
+    route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
     print(route_output)
     
-    # Create a script to check OSPF neighbor status in the namespace
-    vtysh_neighbor_script = f"""#!/bin/bash
-# Set environment variables
-export FRR_NAMESPACE={ns_name}
-export FRR_PATHSPACE={ns_name}
-export FRR_CONFDIR=/etc/netns/{ns_name}/frr
-export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/frr/{ns_name}
-
-# Run vtysh in the namespace
-ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip ospf neighbor'
-"""
-    with open('/tmp/vtysh_neighbor.sh', 'w') as f:
-        f.write(vtysh_neighbor_script)
-    
-    run_cmd(['chmod', '+x', '/tmp/vtysh_neighbor.sh'], check=True)
-    
-    # Check OSPF neighbor status in the namespace
-    print("\n=== OSPF Neighbor Status in namespace {ns_name} ===")
-    ospf_neighbors = run_cmd(['/tmp/vtysh_neighbor.sh'], capture_output=True, text=True).stdout
+    # Check OSPF neighbor status
+    print("\n=== OSPF Neighbor Status ===")
+    ospf_neighbors = run_cmd(['vtysh', '-c', 'show ip ospf neighbor'], capture_output=True, text=True).stdout
     print(ospf_neighbors)
-    
-    # Clean up
-    run_cmd(['rm', '/tmp/vtysh_route.sh', '/tmp/vtysh_neighbor.sh'], check=False)
     
     # Check if we have a Full/DR state
     success = 'Full/DR' in ospf_neighbors
@@ -560,7 +376,7 @@ ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip ospf neighbor'
     
     if gateway_ip:
         print(f"\nTesting connectivity to gateway {gateway_ip}")
-        ping_result = run_in_namespace(ns_name, ['ping', '-c', '4', gateway_ip], capture_output=True)
+        ping_result = run_cmd(['ping', '-c', '4', gateway_ip], capture_output=True)
         ping_success = ping_result.returncode == 0
         print(f"Gateway connectivity: {GREEN+'Success'+RESET if ping_success else RED+'Fail'+RESET}")
     else:
@@ -574,40 +390,25 @@ ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip ospf neighbor'
 def configure_static_route(gateway,iface):
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
 
-# Connectivity tests with DNS fallback logic in namespace
-def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
+# Connectivity tests with DNS fallback logic
+def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
     # Set initial DNS
     dns_servers = ['8.8.8.8', '8.8.4.4']
     
-    # Create a resolv.conf file in the namespace
-    # This is a bit tricky as namespaces don't have their own /etc
-    # We'll use a workaround by creating a temporary resolv.conf and copying it
-    def write_resolv_in_namespace(ns_name, servers):
-        with open('/tmp/resolv.conf.ns', 'w') as f:
-            for s in servers:
-                f.write(f'nameserver {s}\n')
-        # Copy to the namespace's /etc
-        run_cmd(['mkdir', '-p', f'/etc/netns/{ns_name}'], check=False)
-        run_cmd(['cp', '/tmp/resolv.conf.ns', f'/etc/netns/{ns_name}/resolv.conf'], check=True)
-        run_cmd(['rm', '/tmp/resolv.conf.ns'], check=False)
-    
-    write_resolv_in_namespace(ns_name, dns_servers)
-    conf.route.resync()
-
     # Initial connectivity
     ping_ok = dns_ok = False
-    print(f'Initial Ping Tests in namespace {ns_name}:')
+    print(f'Initial Ping Tests:')
     for tgt in dns_servers:
-        r = run_in_namespace(ns_name, ['ping', '-c', '2', tgt], capture_output=True)
+        r = run_cmd(['ping', '-c', '2', tgt], capture_output=True)
         print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
         ping_ok |= (r.returncode==0)
 
     # Initial DNS tests with retry prompt
     while True:
-        print(f'Initial DNS Tests in namespace {ns_name} (@ ' + ', '.join(dns_servers) + '):')
+        print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
         dns_ok = False
         for d in dns_servers:
-            r = run_in_namespace(ns_name, ['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
             ok = (r.returncode==0 and bool(r.stdout.strip()))
             print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
             dns_ok |= ok
@@ -619,34 +420,33 @@ def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, r
             sys.exit(1)
         new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
         dns_servers = [s.strip() for s in new_dns.split(',')]
-        write_resolv_in_namespace(ns_name, dns_servers)
 
     if not ping_ok:
         print('Initial ping tests failed. Exiting.')
         sys.exit(1)
 
     # Full suite
-    print(f'\nFull Test Suite in namespace {ns_name}:')
+    print(f'\nFull Test Suite:')
     for tgt in dns_servers:
-        r = run_in_namespace(ns_name, ['ping', '-c', '4', tgt], capture_output=True, text=True)
+        r = run_cmd(['ping', '-c', '4', tgt], capture_output=True, text=True)
         print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
     for d in dns_servers:
-        r = run_in_namespace(ns_name, ['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+        r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
     # DHCP relay with ping pre-check
     if run_dhcp:
-        print(f'=== DHCP tests (L3 relay) in namespace {ns_name} ===')
+        print(f'=== DHCP tests (L3 relay) ===')
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
         for srv in dhcp_servers:
-            p = run_in_namespace(ns_name, ['ping', '-c', '1', srv], capture_output=True)
+            p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Use a simpler approach for DHCP testing in the namespace
-            # Instead of using scapy, we'll use dhcping which is more reliable in namespaces
+            # Use a simpler approach for DHCP testing
+            # Instead of using scapy, we'll use dhcping which is more reliable
             # If dhcping is not available, we'll fall back to a basic UDP port check
             
             # First try dhcping if available
@@ -654,14 +454,12 @@ def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, r
             
             if dhcping_available:
                 # Use dhcping for DHCP testing
-                result = run_in_namespace(ns_name, ['dhcping', '-s', srv, '-v'], capture_output=True, text=True)
+                result = run_cmd(['dhcping', '-s', srv, '-v'], capture_output=True, text=True)
                 success = result.returncode == 0
             else:
                 # Fall back to a basic UDP port check
                 # This just checks if the DHCP server port is open and responding
-                result = run_in_namespace(ns_name, 
-                    ['nc', '-zvu', srv, '67', '-w', '5'], 
-                    capture_output=True, text=True)
+                result = run_cmd(['nc', '-zvu', srv, '67', '-w', '5'], capture_output=True, text=True)
                 success = result.returncode == 0
             print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if success else RED+'Fail'+RESET))
     else:
@@ -669,27 +467,27 @@ def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, r
 
     # RADIUS with ping pre-check
     if run_radius:
-        print(f'=== RADIUS tests in namespace {ns_name} ===')
+        print(f'=== RADIUS tests ===')
         for srv in radius_servers:
-            p = run_in_namespace(ns_name, ['ping', '-c', '1', srv], capture_output=True)
+            p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
                 print(f'RADIUS {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             cmd = (f'echo "User-Name={user},User-Password={pwd}" '
                   f'| radclient -x -s {srv}:1812 auth {secret}')
-            res = run_in_namespace(ns_name, cmd, shell=True, capture_output=True, text=True)
+            res = run_cmd(cmd, shell=True, capture_output=True, text=True)
             print(f'RADIUS {srv}: ' + (GREEN+'Success'+RESET if res.returncode==0 else RED+'Fail'+RESET))
     else:
         print('Skipping RADIUS tests')
 
     # NTP
-    print(f'=== NTP tests in namespace {ns_name} ===')
+    print(f'=== NTP tests ===')
     for ntp in ('time.google.com', 'pool.ntp.org'):
-        r = run_in_namespace(ns_name, ['ntpdate', '-q', ntp], capture_output=True, text=True)
+        r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
         print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
 
     # HTTPS
-    print(f'=== HTTPS tests in namespace {ns_name} ===')
+    print(f'=== HTTPS tests ===')
     for url in ('https://u1.nilesecure.com',
                 'https://ne-u1.nile-global.cloud',
                 'https://s3.us-west-2.amazonaws.com/nile-prod-us-west-2'):
@@ -699,13 +497,12 @@ def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, r
         # First try a simple TCP connection to the host:port
         try:
             # Use nc to check if the port is open
-            r = run_in_namespace(ns_name, ['nc', '-z', '-w', '5', host, str(port)], capture_output=True)
+            r = run_cmd(['nc', '-z', '-w', '5', host, str(port)], capture_output=True)
             tcp_ok = r.returncode == 0
             
             if tcp_ok:
                 # If TCP connection works, try curl with more options
-                r = run_in_namespace(ns_name, 
-                    ['curl', '-s', '-k', '--connect-timeout', '10', '-o', '/dev/null', '-w', '%{http_code}', url], 
+                r = run_cmd(['curl', '-s', '-k', '--connect-timeout', '10', '-o', '/dev/null', '-w', '%{http_code}', url], 
                     capture_output=True, text=True)
                 ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
             else:
@@ -718,30 +515,6 @@ def run_tests_in_namespace(ns_name, iface, mgmt1, client_subnet, dhcp_servers, r
             
         print(f'HTTPS {url}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
-# Configure interface in namespace
-def configure_interface_in_namespace(ns_name, iface, ip_addr, netmask):
-    print(f'Configuring {iface} in namespace {ns_name} → {ip_addr}/{netmask}')
-    prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-    run_in_namespace(ns_name, ['ip', 'addr', 'flush', 'dev', iface], check=True)
-    run_in_namespace(ns_name, ['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
-    run_in_namespace(ns_name, ['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
-
-# Add loopbacks in namespace
-def add_loopbacks_in_namespace(ns_name, m1, m2, client):
-    for name, subnet in [('mgmt1', m1), ('mgmt2', m2), ('client', client)]:
-        net = ipaddress.IPv4Network(subnet)
-        iface = f'dummy_{name}'
-        addr = str(net.network_address+1)
-        prefix = net.prefixlen
-        run_in_namespace(ns_name, ['ip', 'link', 'add', iface, 'type', 'dummy'], check=False)
-        run_in_namespace(ns_name, ['ip', 'addr', 'add', f'{addr}/{prefix}', 'dev', iface], check=False)
-        run_in_namespace(ns_name, ['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
-        print(f'Loopback {iface} in namespace {ns_name} → {addr}/{prefix}')
-
-# Configure static route in namespace
-def configure_static_route_in_namespace(ns_name, gateway, iface):
-    run_in_namespace(ns_name, ['ip', 'route', 'add', 'default', 'via', gateway, 'metric', '200'], check=False)
-
 # Main flow
 def main():
     # Get user input from config file or interactive prompts
@@ -751,50 +524,37 @@ def main():
 
     # Record the original state of the interface
     state = record_state(frr_iface)
-
-    # Create the FRR namespace
-    create_namespace(FRR_NS)
     
     try:
-        # Move the FRR interface to the namespace
-        move_interface_to_namespace(frr_iface, FRR_NS)
+        # Configure the interface
+        configure_interface(frr_iface, ip_addr, netmask)
         
-        # Configure the interface in the namespace
-        configure_interface_in_namespace(FRR_NS, frr_iface, ip_addr, netmask)
+        # Add loopbacks
+        add_loopbacks(mgmt1, mgmt2, client_subnet)
         
-        # Add loopbacks in the namespace
-        add_loopbacks_in_namespace(FRR_NS, mgmt1, mgmt2, client_subnet)
-        
-        # Configure static route in the namespace
+        # Configure static route
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-        configure_static_route_in_namespace(FRR_NS, gateway, frr_iface)
+        configure_static_route(gateway, frr_iface)
         
         # Update scapy's routing table
         conf.route.resync()
         
-        # Sniff for OSPF Hello packets in the namespace
-        up, area, hi, di = sniff_ospf_hello_in_namespace(FRR_NS, frr_iface)
+        # Sniff for OSPF Hello packets
+        up, area, hi, di = sniff_ospf_hello(frr_iface)
         
-        # Configure OSPF in the namespace
-        configure_ospf_in_namespace(FRR_NS, frr_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
+        # Configure OSPF
+        configure_ospf(frr_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
         
-        # Check OSPF status in the namespace
-        ospf_ok = show_ospf_status_in_namespace(FRR_NS)
+        # Check OSPF status
+        ospf_ok = show_ospf_status()
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
         
-        # Run connectivity tests in the namespace
-        run_tests_in_namespace(FRR_NS, frr_iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
+        # Run connectivity tests
+        run_tests(frr_iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
     
     finally:
-        # Move the interface back to the default namespace
-        print(f"Moving {frr_iface} back to default namespace")
-        run_in_namespace(FRR_NS, ['ip', 'link', 'set', frr_iface, 'netns', '1'], check=False)
-        
         # Restore the original state
         restore_state(frr_iface, state)
-        
-        # Delete the namespace
-        delete_namespace(FRR_NS)
 
 if __name__=='__main__':
     if os.geteuid()!=0:
