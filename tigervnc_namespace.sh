@@ -78,19 +78,67 @@ chmod +x /tmp/.vnc/xstartup
 # Start TigerVNC server in the namespace with minimal options
 echo "Starting TigerVNC server in namespace $VNC_NS"
 
-# Use the most basic options that should work with all versions
-ip netns exec $VNC_NS \
-  Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 &
+# Create a simple xstartup script
+mkdir -p /tmp/.vnc
+cat > /tmp/.vnc/xstartup << EOF
+#!/bin/sh
+xterm &
+EOF
+chmod +x /tmp/.vnc/xstartup
 
-# Wait for VNC server to start
+# Try different approaches to start TigerVNC
+echo "Attempting to start TigerVNC with different options..."
+
+# Approach 1: Basic start
+echo "Approach 1: Basic start"
+ip netns exec $VNC_NS Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 &
+VNC_PID=$!
 sleep 2
+
+# Check if VNC server is running
+if ! ip netns exec $VNC_NS ps -p $VNC_PID > /dev/null; then
+  echo "Approach 1 failed, trying approach 2..."
+  
+  # Approach 2: With explicit interface binding
+  echo "Approach 2: With explicit interface binding"
+  ip netns exec $VNC_NS Xvnc :0 -geometry $VNC_GEOMETRY -depth 24 -interface $VNC_IP &
+  VNC_PID=$!
+  sleep 2
+  
+  # Check if VNC server is running
+  if ! ip netns exec $VNC_NS ps -p $VNC_PID > /dev/null; then
+    echo "Approach 2 failed, trying approach 3..."
+    
+    # Approach 3: Using vncserver script if available
+    if command -v vncserver >/dev/null 2>&1; then
+      echo "Approach 3: Using vncserver script"
+      ip netns exec $VNC_NS bash -c "DISPLAY=:0 vncserver -geometry $VNC_GEOMETRY -depth 24"
+      sleep 2
+    else
+      echo "vncserver script not found, cannot try approach 3"
+      echo "All approaches failed. Please check your TigerVNC installation."
+      exit 1
+    fi
+  fi
+fi
 
 # Start xterm manually
 echo "Starting xterm in namespace $VNC_NS"
 ip netns exec $VNC_NS bash -c "DISPLAY=:0 xterm &"
 
+# Set up port forwarding from host to namespace
+echo "Setting up port forwarding to make VNC accessible from outside the namespace"
+iptables -t nat -A PREROUTING -p tcp --dport $VNC_PORT -j DNAT --to-destination $VNC_IP:$VNC_PORT
+iptables -t nat -A POSTROUTING -p tcp -d $VNC_IP --dport $VNC_PORT -j MASQUERADE
+echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Check if VNC server is listening
+echo "Checking if VNC server is listening..."
+ip netns exec $VNC_NS netstat -tuln | grep 5900 || echo "Warning: VNC server not detected on port 5900"
+
 # Print connection information
-echo "VNC server is running on $VNC_IP:$VNC_PORT"
+echo "VNC server should be running on $VNC_IP:$VNC_PORT"
+echo "You can also try connecting to localhost:$VNC_PORT due to port forwarding"
 
 # Wait for VNC server to start
 sleep 2

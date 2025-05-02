@@ -167,15 +167,17 @@ This will:
 - Verify that the VNC interface has the correct IP address and can reach the gateway
 - If you see "Xvnc: command not found", install TigerVNC with: `sudo apt install tigervnc-standalone-server`
 - If you see "xterm: command not found", install xterm with: `sudo apt install xterm`
-- The script now uses minimal options that should work with all versions of TigerVNC
-- If you still see "unrecognized option" errors, you may need to:
-  - Check the Xvnc man page with `man Xvnc` to see the supported options
-  - Edit the script to use only the options supported by your version
-  - Try running with just the basic options: `Xvnc :0`
+- The script now tries multiple approaches to start TigerVNC:
+  - Basic start with minimal options
+  - With explicit interface binding
+  - Using the vncserver script if available
 - If you have issues connecting to the VNC server:
-  - Make sure you're connecting to the correct IP address and port
-  - Try connecting to the display directly: `vncviewer $VNC_IP:0`
-  - Check if the VNC server is listening with: `ip netns exec vnc_ns netstat -tuln | grep 5900`
+  - Try connecting to localhost:5900 (the script sets up port forwarding)
+  - Try connecting to the namespace IP directly: `vncviewer $VNC_IP:0`
+  - Check if the VNC server is listening with: `sudo ip netns exec vnc_ns netstat -tuln | grep 5900`
+  - Check if port forwarding is working: `sudo iptables -t nat -L PREROUTING`
+  - Make sure your firewall allows connections to port 5900: `sudo ufw status`
+  - Try a different VNC client (e.g., TigerVNC Viewer, RealVNC Viewer, Remmina)
 
 ### FRR Test Issues
 
