@@ -443,20 +443,42 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             
             # Use scapy to craft and send DHCP packets
             xid = random.randint(1, 0xffffffff)
+            client_mac = RandMAC()
+            
+            # For Layer 3 relay, we need to:
+            # 1. Use correct ports (client:68 -> server:67)
+            # 2. Set giaddr to the relay agent IP
+            # 3. Include proper DHCP options
+            
             pkt = (Ether(dst='ff:ff:ff:ff:ff:ff')/
                   IP(src=helper_ip, dst=srv)/
-                  UDP(sport=67, dport=67)/
-                  BOOTP(op=1, chaddr=RandMAC(), xid=xid, giaddr=helper_ip)/
-                  DHCP(options=[('message-type','discover'), ('end')]))
+                  UDP(sport=68, dport=67)/  # Client port 68, Server port 67
+                  BOOTP(op=1, chaddr=client_mac, xid=xid, giaddr=helper_ip, flags=0x8000)/  # Set broadcast flag
+                  DHCP(options=[
+                      ('message-type', 'discover'),
+                      ('param_req_list', [1, 3, 6, 15, 51, 58, 59]),  # Common requested options
+                      ('end')
+                  ]))
+            
             if DEBUG:
                 print('DEBUG: DHCP DISCOVER summary:')
                 print(pkt.summary())
-            sendp(pkt, iface=iface, verbose=False)
-            resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
+                print('DEBUG: DHCP DISCOVER details:')
+                print(pkt.show())
+            
+            # Start sniffing before sending to avoid race conditions
+            # Use a more permissive filter to catch all potential responses
+            sniff_filter = f'udp and (port 67 or port 68)'
+            
+            # Send the packet
+            sendp(pkt, iface=iface, verbose=DEBUG)
+            
+            # Sniff for responses
+            resp = sniff(iface=iface, filter=sniff_filter,
                         timeout=10, count=1,
-                        lfilter=lambda p: p.haslayer(BOOTP)
-                                      and p[BOOTP].xid==xid
-                                      and p[BOOTP].op==2)
+                        lfilter=lambda p: p.haslayer(BOOTP) and p.haslayer(DHCP) and
+                                      p[BOOTP].xid == xid and
+                                      p[BOOTP].op == 2)  # BOOTREPLY
             if DEBUG:
                 print(f'DEBUG: DHCP response count: {len(resp)}')
                 for p in resp: print(p.summary())
