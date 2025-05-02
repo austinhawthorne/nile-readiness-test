@@ -1,125 +1,126 @@
-# nile-readiness-test
-Script to test that a network is ready to support a Nile installation.  The script mimics what a Nile gateway will perform to bring up a Nile service, as well as tests some basic network services.
+# Nile Readiness Test with Network Namespace Isolation
 
-Running this script will test:
-- OSPF
-  - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency and advertise routes for defined subnets (NSB, Sensor, Client).
-  - Will fall back to static if this fails.
-- DNS Reachability
-  - Will try the default DNS servers for Nile.
-  - If that fails, will prompt for a user specified DNS server to use.
-- NTP Reachability
-  - Will run a test to sync with default Nile defined NTP servers
-- DHCP Server Reachability
-  - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
-- RADIUS Reachability
-  - Will run a sythentic test against a user defined RADIUS server.
-- Required Cloud Reachability for Nile Service
-  - Will run a TCP SYN test via NMAP
+This repository contains scripts for running Nile Readiness Tests while isolating network interfaces using Linux network namespaces. This approach allows you to:
 
-Requires:
-- frr
-- scapy (python module)
-- dig
-- ntpdate
-- curl
-- radclient (bundled with freeradius)
+1. Run RealVNC server on one interface (e.g., end0) in a separate network namespace
+2. Run FRR tests on another interface (e.g., enxf0a731f41761) in the default namespace
 
-Usage:  
-- Connect host to upstream firewall port that will be used for Nile uplink
-- Ensure no other network connections are active on host
-- Launch script:  sudo python3 nrt.py
+## Scripts
 
-Sample Output:
+- **vnc_namespace.sh**: Creates a network namespace for RealVNC server and moves the specified interface to that namespace
+- **nrt_default.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
+- **nrt.py**: Original script that uses network namespaces for FRR tests (not recommended with this approach)
+
+## Prerequisites
+
+- Linux system with network namespace support
+- FRR (Free Range Routing) installed
+- RealVNC server installed
+- Python 3.6+ with required packages:
+  - scapy
+  - ipaddress
+- Required utilities:
+  - vtysh (FRR)
+  - radclient (FreeRADIUS client)
+  - dig (DNS lookup utility)
+  - ntpdate (NTP utility)
+  - curl (HTTPS test utility)
+
+## Installation
+
+1. Clone this repository:
+   ```
+   git clone https://github.com/yourusername/nile-readiness-test.git
+   cd nile-readiness-test
+   ```
+
+2. Install required packages:
+   ```
+   sudo apt update
+   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress
+   ```
+
+3. Make the scripts executable:
+   ```
+   chmod +x vnc_namespace.sh nrt_default.py
+   ```
+
+## Configuration
+
+1. Edit the configuration in `vnc_namespace.sh`:
+   - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
+   - `VNC_IFACE`: Interface to move to VNC namespace (default: "end0")
+   - `VNC_IP`: IP address for VNC interface (default: "192.168.1.100")
+   - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
+   - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "192.168.1.1")
+
+2. Create a JSON configuration file for `nrt_default.py`:
+   ```json
+   {
+     "frr_interface": "enxf0a731f41761",
+     "ip_address": "192.168.2.100",
+     "netmask": "255.255.255.0",
+     "gateway": "192.168.2.1",
+     "nsb_subnet": "10.1.1.0/24",
+     "sensor_subnet": "10.1.2.0/24",
+     "client_subnet": "10.1.3.0/24",
+     "run_dhcp_tests": true,
+     "dhcp_servers": ["192.168.2.10"],
+     "run_radius_tests": false
+   }
+   ```
+
+## Usage
+
+### Step 1: Start RealVNC Server in a Separate Namespace
+
+Run the VNC namespace script:
 ```
-austin@client1:~ $ sudo python nrt.py
-Interface to configure (e.g., eth0): eth1
-IP address: 10.0.0.2
-Netmask (e.g. 255.255.255.0): 255.255.255.0
-Gateway IP: 10.0.0.1
-NSB subnet (CIDR, e.g. 192.168.1.0/24): 10.0.1.0/24
-Sensor subnet (CIDR): 10.0.2.0/24
-Client subnet (CIDR): 10.0.3.0/24
-Perform DHCP tests? [y/N]: y
-DHCP server IP(s) (comma-separated): 172.16.0.100
-Perform RADIUS tests? [y/N]: y
-RADIUS server IP(s) (comma-separated): 172.16.0.100
-RADIUS shared secret: abc123
-RADIUS test username: bob
-RADIUS test password: abc123
-Configuring eth1 → 10.0.0.2/255.255.255.0
-Loopback dummy_mgmt1 → 10.0.1.1/24
-Loopback dummy_mgmt2 → 10.0.2.1/24
-Loopback dummy_client → 10.0.3.1/24
-Waiting for OSPF Hello...
-Note: this version of vtysh never writes vtysh.conf
-Building Configuration...
-Integrated configuration saved to /etc/frr/frr.conf
-[OK]
-OSPF adjacency configured
-
-=== Waiting for OSPF state Full/DR (30s timeout) ===
-OSPF reached Full/DR state
-
-=== Routing Table ===
-Codes: K - kernel route, C - connected, S - static, R - RIP,
-       O - OSPF, I - IS-IS, B - BGP, E - EIGRP, N - NHRP,
-       T - Table, v - VNC, V - VNC-Direct, A - Babel, F - PBR,
-       f - OpenFabric,
-       > - selected route, * - FIB route, q - queued, r - rejected, b - backup
-       t - trapped, o - offload failure
-
-O   0.0.0.0/0 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-K>* 0.0.0.0/0 [0/200] via 10.0.0.1, eth1, 00:00:21
-O   10.0.0.0/24 [110/100] is directly connected, eth1, weight 1, 00:00:21
-C>* 10.0.0.0/24 is directly connected, eth1, 00:00:21
-O   10.0.1.0/24 [110/10] is directly connected, dummy_mgmt1, weight 1, 00:00:21
-C>* 10.0.1.0/24 is directly connected, dummy_mgmt1, 00:00:21
-O   10.0.2.0/24 [110/10] is directly connected, dummy_mgmt2, weight 1, 00:00:21
-C>* 10.0.2.0/24 is directly connected, dummy_mgmt2, 00:00:21
-O   10.0.3.0/24 [110/10] is directly connected, dummy_client, weight 1, 00:00:21
-C>* 10.0.3.0/24 is directly connected, dummy_client, 00:00:21
-O>* 10.0.100.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 10.10.20.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 10.253.240.0/20 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 172.16.0.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 192.168.1.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-
-OSPF adjacency test: Success
-Initial Ping Tests:
-Ping 8.8.8.8: Success
-Ping 8.8.4.4: Success
-Initial DNS Tests (@ 8.8.8.8, 8.8.4.4):
-DNS @8.8.8.8: Fail
-DNS @8.8.4.4: Fail
-Default DNS tests failed. Enter alternate DNS servers? [y/N]: y
-Enter DNS server IP(s) (comma-separated): 1.1.1.1
-Initial DNS Tests (@ 1.1.1.1):
-DNS @1.1.1.1: Success
-
-Full Test Suite:
-Ping 1.1.1.1: Success
-DNS @1.1.1.1: Success
-=== DHCP tests (L3 relay) ===
-DHCP relay to 172.16.0.100: Success
-=== RADIUS tests ===
-RADIUS 172.16.0.100: Success
-=== NTP tests ===
-NTP time.google.com: Success
-NTP pool.ntp.org: Success
-=== HTTPS tests ===
-HTTPS https://u1.nilesecure.com: Success
-HTTPS https://ne-u1.nile-global.cloud: Success
-HTTPS https://s3.us-west-2.amazonaws.com/nile-prod-us-west-2: Success
-
-Restoring original state...
-Synchronizing state of frr.service with SysV service script with /lib/systemd/systemd-sysv-install.
-Executing: /lib/systemd/systemd-sysv-install disable frr
-Removed FRR config, stopped service, restored DNS.
+sudo ./vnc_namespace.sh
 ```
 
-Notes:
-- Only tested on Raspberry Pi, should run on any debian based distribution
-- Will be adding in checks for Nile Cloud Services, like Guest
-- Will add the ability to check for dependencies and install if missing
-- RADIUS is sourced from the interface IP of the uplink, need to change to the NSB subnet interface IP.  Radclient does not allow this, need to investigate.
+This will:
+1. Create a network namespace called "vnc_ns"
+2. Move the specified interface (default: end0) to that namespace
+3. Configure the interface with the specified IP address
+4. Start RealVNC server in the namespace
+5. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
+
+### Step 2: Run FRR Tests in the Default Namespace
+
+In a separate terminal, run the FRR tests:
+```
+sudo ./nrt_default.py --config config.json
+```
+
+Or run interactively:
+```
+sudo ./nrt_default.py
+```
+
+This will:
+1. Configure the FRR interface (default: enxf0a731f41761) in the default namespace
+2. Add loopback interfaces
+3. Sniff for OSPF Hello packets
+4. Configure OSPF
+5. Run connectivity tests (ping, DNS, DHCP, RADIUS, NTP, HTTPS)
+6. Restore the original state when done
+
+## Troubleshooting
+
+### VNC Server Issues
+
+- If VNC server fails to start in the namespace, check if it's already running in the default namespace
+- Verify that the VNC interface has the correct IP address and can reach the gateway
+
+### FRR Test Issues
+
+- If OSPF adjacency fails, check if the upstream router is sending OSPF Hello packets
+- Verify that the FRR interface has the correct IP address and can reach the upstream router
+- Check FRR logs: `sudo tail -f /var/log/frr/zebra.log /var/log/frr/ospfd.log`
+
+## Notes
+
+- The scripts must be run as root (sudo)
+- When you stop the VNC namespace script (Ctrl+C), it will automatically move the interface back to the default namespace and clean up
+- The FRR test script will restore the original state of the interface when it completes or if an error occurs
