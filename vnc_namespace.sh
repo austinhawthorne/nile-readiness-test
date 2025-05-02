@@ -5,9 +5,9 @@
 # Configuration
 VNC_NS="vnc_ns"           # Namespace for VNC
 VNC_IFACE="end0"          # Interface to move to VNC namespace
-VNC_IP="192.168.1.100"    # IP address for VNC interface
+VNC_IP="10.2.0.199"    # IP address for VNC interface
 VNC_NETMASK="24"          # Netmask in CIDR notation
-VNC_GATEWAY="192.168.1.1" # Default gateway for VNC namespace
+VNC_GATEWAY="10.2.0.1" # Default gateway for VNC namespace
 
 # Check if running as root
 if [ "$(id -u)" -ne 0 ]; then
