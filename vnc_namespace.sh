@@ -54,9 +54,37 @@ nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
+# Set up Wayland environment
+echo "Setting up Wayland environment in namespace $VNC_NS"
+
+# Create XDG_RUNTIME_DIR if it doesn't exist
+mkdir -p /tmp/xdg-runtime-$VNC_NS
+chmod 700 /tmp/xdg-runtime-$VNC_NS
+
+# Set environment variables for Wayland
+export XDG_RUNTIME_DIR=/tmp/xdg-runtime-$VNC_NS
+export WAYLAND_DISPLAY=wayland-1
+
+# Start Weston (Wayland compositor) in the namespace
+echo "Starting Weston in namespace $VNC_NS"
+ip netns exec $VNC_NS \
+  env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+  weston --backend=headless-backend.so \
+  --socket=$WAYLAND_DISPLAY \
+  --no-config &
+
+# Wait for Weston to start
+sleep 2
+
 # Start WayVNC server in the namespace
 echo "Starting WayVNC server in namespace $VNC_NS"
-ip netns exec $VNC_NS wayvnc $VNC_IP:5900
+ip netns exec $VNC_NS \
+  env XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR \
+  WAYLAND_DISPLAY=$WAYLAND_DISPLAY \
+  wayvnc $VNC_IP:5900 &
+
+# Wait for WayVNC to start
+sleep 1
 
 # Register cleanup function to run on script exit
 trap cleanup EXIT
