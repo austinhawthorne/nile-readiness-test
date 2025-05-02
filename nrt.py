@@ -416,23 +416,43 @@ end
     run_cmd(['chmod', '644', f'/etc/netns/{ns_name}/frr/daemons'], check=False)
     
     # Create directories for FRR to run in the namespace
-    run_cmd(['mkdir', '-p', f'/var/run/netns/{ns_name}/frr'], check=False)
+    # We need to create the proper directory structure for PID files
+    run_cmd(['mkdir', '-p', f'/var/run/frr/{ns_name}'], check=False)
+    run_cmd(['chmod', '755', f'/var/run/frr/{ns_name}'], check=False)
     
     # Start FRR in the namespace
     print(f"Starting FRR daemons in namespace {ns_name}")
     
-    # Create a script to start FRR in the namespace
+    # Create a script to start FRR in the namespace with additional safeguards
     start_script = f"""#!/bin/bash
 # Set environment variables
 export FRR_NAMESPACE={ns_name}
 export FRR_PATHSPACE={ns_name}
 export FRR_CONFDIR=/etc/netns/{ns_name}/frr
 export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/frr/{ns_name}
 
-# Start FRR daemons in the namespace
-ip netns exec {ns_name} /usr/lib/frr/zebra -d -N {ns_name} -f $FRR_CONFDIR/frr.conf
-ip netns exec {ns_name} /usr/lib/frr/ospfd -d -N {ns_name} -f $FRR_CONFDIR/frr.conf
+# Make sure the run directory exists and has proper permissions
+mkdir -p /var/run/frr/{ns_name}
+chmod 755 /var/run/frr/{ns_name}
+
+# Clean up any existing PID files that might cause conflicts
+rm -f /var/run/frr/{ns_name}/zebra.pid
+rm -f /var/run/frr/{ns_name}/ospfd.pid
+
+# Start zebra first
+echo "Starting zebra in namespace {ns_name}..."
+ip netns exec {ns_name} /usr/lib/frr/zebra -d -N {ns_name} -f $FRR_CONFDIR/frr.conf -i /var/run/frr/{ns_name}/zebra.pid
+sleep 5  # Give zebra time to fully initialize
+
+# Now start ospfd
+echo "Starting ospfd in namespace {ns_name}..."
+ip netns exec {ns_name} /usr/lib/frr/ospfd -d -N {ns_name} -f $FRR_CONFDIR/frr.conf -i /var/run/frr/{ns_name}/ospfd.pid
+
+# Verify daemons are running
+echo "Verifying FRR daemons are running..."
+ps aux | grep "zebra -d -N {ns_name}" | grep -v grep
+ps aux | grep "ospfd -d -N {ns_name}" | grep -v grep
 """
     with open('/tmp/start_frr.sh', 'w') as f:
         f.write(start_script)
@@ -480,7 +500,7 @@ export FRR_NAMESPACE={ns_name}
 export FRR_PATHSPACE={ns_name}
 export FRR_CONFDIR=/etc/netns/{ns_name}/frr
 export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/frr/{ns_name}
 
 # Run vtysh in the namespace
 ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip route'
@@ -507,7 +527,7 @@ export FRR_NAMESPACE={ns_name}
 export FRR_PATHSPACE={ns_name}
 export FRR_CONFDIR=/etc/netns/{ns_name}/frr
 export FRR_VTYDIR=/etc/netns/{ns_name}/frr
-export FRR_STATEDIR=/var/run/netns/{ns_name}/frr
+export FRR_STATEDIR=/var/run/frr/{ns_name}
 
 # Run vtysh in the namespace
 ip netns exec {ns_name} /usr/bin/vtysh -c 'show ip ospf neighbor'
