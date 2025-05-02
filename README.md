@@ -8,13 +8,14 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 ## Scripts
 
 - **vnc_namespace.sh**: Creates a network namespace for WayVNC server and moves the specified interface to that namespace
+- **tigervnc_namespace.sh**: Alternative script that uses TigerVNC instead of WayVNC (more compatible with different systems)
 - **nrt.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
 
 ## Prerequisites
 
 - Linux system with network namespace support
 - FRR (Free Range Routing) installed
-- WayVNC server installed
+- VNC server (either WayVNC or TigerVNC)
 - Python 3.6+ with required packages:
   - scapy
   - ipaddress
@@ -36,27 +37,43 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 2. Install required packages:
    ```
    sudo apt update
-   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress wayvnc
+   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress
    ```
 
-   Optionally, install Weston (recommended for WayVNC):
+   For WayVNC (requires Wayland):
    ```
-   sudo apt install weston
+   sudo apt install wayvnc weston
+   ```
+
+   OR for TigerVNC (more compatible with different systems):
+   ```
+   sudo apt install tigervnc-standalone-server xterm
    ```
 
 3. Make the scripts executable:
    ```
-   chmod +x vnc_namespace.sh nrt.py
+   chmod +x vnc_namespace.sh tigervnc_namespace.sh nrt.py
    ```
 
 ## Configuration
 
-1. Edit the configuration in `vnc_namespace.sh`:
+1. Edit the configuration in the VNC script you plan to use:
+
+   For `vnc_namespace.sh` (WayVNC):
    - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
    - `VNC_IFACE`: Interface to move to VNC namespace (default: "end0")
    - `VNC_IP`: IP address for VNC interface (default: "10.2.0.199")
    - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
    - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "10.2.0.1")
+
+   For `tigervnc_namespace.sh` (TigerVNC):
+   - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
+   - `VNC_IFACE`: Interface to move to VNC namespace (default: "end0")
+   - `VNC_IP`: IP address for VNC interface (default: "10.2.0.199")
+   - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
+   - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "10.2.0.1")
+   - `VNC_PORT`: VNC port (default: "5900", which is display :0)
+   - `VNC_GEOMETRY`: Screen resolution (default: "1024x768")
 
 2. Create a JSON configuration file for `nrt.py`:
    ```json
@@ -76,9 +93,11 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 
 ## Usage
 
-### Step 1: Start WayVNC Server in a Separate Namespace
+### Step 1: Start VNC Server in a Separate Namespace
 
-Run the VNC namespace script:
+#### Option A: Using WayVNC (Wayland-based)
+
+Run the WayVNC namespace script:
 ```
 sudo ./vnc_namespace.sh
 ```
@@ -90,6 +109,22 @@ This will:
 4. Start Weston (Wayland compositor) in the namespace
 5. Start WayVNC server in the namespace
 6. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
+
+#### Option B: Using TigerVNC (X11-based, more compatible)
+
+Run the TigerVNC namespace script:
+```
+sudo ./tigervnc_namespace.sh
+```
+
+This will:
+1. Create a network namespace called "vnc_ns"
+2. Move the specified interface (default: end0) to that namespace
+3. Configure the interface with the specified IP address
+4. Start TigerVNC server in the namespace
+5. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
+
+You can connect to the TigerVNC server using any VNC client at the IP address and port displayed when the script runs.
 
 ### Step 2: Run FRR Tests in the Default Namespace
 
@@ -113,15 +148,26 @@ This will:
 
 ## Troubleshooting
 
-### WayVNC Server Issues
+### VNC Server Issues
+
+#### WayVNC Issues
 
 - If WayVNC server fails to start in the namespace, check if it's already running in the default namespace
 - Verify that the VNC interface has the correct IP address and can reach the gateway
 - WayVNC requires a running Wayland compositor. The script sets XDG_RUNTIME_DIR and WAYLAND_DISPLAY environment variables, but you may need to:
   - Install Weston if it's not already installed: `sudo apt install weston`
-  - If Weston is not available on your system, you may need to use a different VNC server like TigerVNC or x11vnc
+  - If Weston is not available on your system, use the TigerVNC script instead
   - If using a different Wayland compositor, adjust the WAYLAND_DISPLAY value in the script
 - If you see errors about XDG_RUNTIME_DIR or WAYLAND_DISPLAY, the script attempts to set these up, but you may need to adjust them based on your system configuration
+- If you see "error in libwayland error in client communication", this usually indicates a problem with the Wayland compositor. Try using TigerVNC instead.
+
+#### TigerVNC Issues
+
+- If TigerVNC server fails to start in the namespace, check if it's already running in the default namespace
+- Verify that the VNC interface has the correct IP address and can reach the gateway
+- If you see "Xvnc: command not found", install TigerVNC with: `sudo apt install tigervnc-standalone-server`
+- If you see "xterm: command not found", install xterm with: `sudo apt install xterm`
+- If you have issues connecting to the VNC server, check that your VNC client is connecting to the correct IP address and port
 
 ### FRR Test Issues
 
