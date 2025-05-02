@@ -1,0 +1,16 @@
+{
+  "frr_interface": "enxf0a731f41761",
+  "ip_address": "10.200.1.2",
+  "netmask": "255.255.255.252",
+  "gateway": "10.200.1.1",
+  "nsb_subnet": "10.200.10.0/24",
+  "sensor_subnet": "10.200.11.0/24",
+  "client_subnet": "10.234.3.0/24",
+  "run_dhcp_tests": true,
+  "dhcp_servers": ["172.27.5.5"],
+  "run_radius_tests": false,
+  "radius_servers": ["192.168.1.100"],
+  "radius_secret": "secret",
+  "radius_username": "testuser",
+  "radius_password": "testpass"
+}
