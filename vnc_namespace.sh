@@ -1,6 +1,6 @@
 #!/bin/bash
-# Script to run RealVNC server in a separate network namespace
-# This allows VNC to operate on end0 while FRR tests run on enxf0a731f41761 in the default namespace
+# Script to run WayVNC server in a separate network namespace
+# This allows WayVNC to operate on end0 while FRR tests run on enxf0a731f41761 in the default namespace
 
 # Configuration
 VNC_NS="vnc_ns"           # Namespace for VNC
@@ -54,9 +54,9 @@ nameserver 8.8.8.8
 nameserver 8.8.4.4
 EOF
 
-# Start RealVNC server in the namespace
-echo "Starting RealVNC server in namespace $VNC_NS"
-ip netns exec $VNC_NS vncserver
+# Start WayVNC server in the namespace
+echo "Starting WayVNC server in namespace $VNC_NS"
+ip netns exec $VNC_NS wayvnc $VNC_IP:5900
 
 # Register cleanup function to run on script exit
 trap cleanup EXIT
