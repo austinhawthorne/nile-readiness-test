@@ -497,8 +497,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 c = dhcp_client.DHCPClient(
                     iface,
                     send_from_port=67,  # Server port (for relay)
-                    send_to_port=67,    # Server port
-                    relay=helper_ip     # Set the relay agent IP (giaddr)
+                    send_to_port=67     # Server port
                 )
                 
                 # Create a list of DHCP options
