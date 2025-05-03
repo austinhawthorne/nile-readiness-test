@@ -431,7 +431,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
-    # DHCP relay with ping pre-check - using scapy like the original
+    # DHCP relay with ping pre-check
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
@@ -441,85 +441,34 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Use scapy to craft and send DHCP packets
+            # Use original DHCP packet crafting code
             xid = random.randint(1, 0xffffffff)
-            client_mac = RandMAC()
-            
-            # For Layer 3 relay, we need to:
-            # 1. Keep ports as 67 as per user feedback
-            # 2. Set giaddr to the relay agent IP
-            # 3. Include proper DHCP options
-            
             pkt = (Ether(dst='ff:ff:ff:ff:ff:ff')/
                   IP(src=helper_ip, dst=srv)/
-                  UDP(sport=67, dport=67)/  # Using port 67 for both as per user feedback
-                  BOOTP(op=1, chaddr=client_mac, xid=xid, giaddr=helper_ip, flags=0x8000)/  # Set broadcast flag
-                  DHCP(options=[
-                      ('message-type', 'discover'),
-                      ('param_req_list', [1, 3, 6, 15, 51, 58, 59]),  # Common requested options
-                      ('end')
-                  ]))
-            
-            print('DHCP DISCOVER packet created:')
-            print(f'  Source IP: {helper_ip}, Destination IP: {srv}')
-            print(f'  Transaction ID (xid): {hex(xid)}')
-            print(f'  Relay Agent IP (giaddr): {helper_ip}')
+                  UDP(sport=67, dport=67)/
+                  BOOTP(op=1, chaddr=RandMAC(), xid=xid, giaddr=helper_ip)/
+                  DHCP(options=[('message-type', 'discover'), ('end')]))
             
             if DEBUG:
                 print('DEBUG: DHCP DISCOVER summary:')
                 print(pkt.summary())
-                print('DEBUG: DHCP DISCOVER details:')
-                print(pkt.show())
-            
-            # Start sniffing before sending to avoid race conditions
-            # Use a more permissive filter to catch all potential responses
-            sniff_filter = f'udp'  # Most permissive filter to catch any UDP traffic
-            
-            print(f'Sending DHCP DISCOVER and waiting for response...')
+                print(f'DEBUG: Transaction ID (xid): {hex(xid)}')
             
             # Send the packet
-            sendp(pkt, iface=iface, verbose=DEBUG)
+            sendp(pkt, iface=iface, verbose=False)
             
-            # Sniff for responses with a longer timeout (30 seconds)
-            print(f'Sniffing for DHCP responses on {iface} for 30 seconds...')
-            resp = sniff(iface=iface, filter=sniff_filter,
-                        timeout=30, count=5,  # Increased timeout and count
-                        lfilter=lambda p: p.haslayer(UDP))  # Capture all UDP packets first
+            # Use original sniffing code
+            resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
+                        timeout=30, count=1,
+                        lfilter=lambda p: p.haslayer(BOOTP) and
+                                      p[BOOTP].xid == xid and
+                                      p[BOOTP].op == 2)
             
-            # Process captured packets
-            dhcp_responses = []
-            for p in resp:
-                if DEBUG:
-                    print(f'DEBUG: Captured packet: {p.summary()}')
-                
-                # Check if it's a DHCP packet
-                if p.haslayer(BOOTP):
-                    print(f'Found BOOTP packet: {p.summary()}')
-                    if p[BOOTP].op == 2:  # BOOTREPLY
-                        print(f'  BOOTREPLY detected, xid={hex(p[BOOTP].xid)}')
-                        if p[BOOTP].xid == xid:
-                            print(f'  Transaction ID matches!')
-                            dhcp_responses.append(p)
-                            if p.haslayer(DHCP):
-                                print(f'  DHCP layer present')
-                                for opt in p[DHCP].options:
-                                    if opt[0] == 'message-type' and opt[1] == 2:  # DHCP Offer
-                                        print(f'  DHCP OFFER detected!')
+            if DEBUG:
+                print(f'DEBUG: DHCP response count: {len(resp)}')
+                for p in resp: print(p.summary())
             
-            # Check if we found any valid responses
-            if dhcp_responses:
-                print(f'Found {len(dhcp_responses)} valid DHCP responses')
-                success = True
-            else:
-                print(f'No valid DHCP responses found')
-                success = False
-            
-            # Always print response count and summary regardless of DEBUG mode
-            print(f'Total UDP packets captured: {len(resp)}')
-            for i, p in enumerate(resp):
-                print(f'Packet {i+1}: {p.summary()}')
-                
-            print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if dhcp_responses else RED+'Fail'+RESET))
+            print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if resp else RED+'Fail'+RESET))
     else:
         print('Skipping DHCP tests')
 
