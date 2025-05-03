@@ -457,9 +457,26 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             if not iface_mac:
                 print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
                 iface_mac = str(RandMAC())
-            
-            # Create a more detailed DHCP packet
+                
+            # Create a random client MAC address
             client_mac = str(RandMAC())
+            
+            # Try using dhcping if available
+            dhcping_available = shutil.which('dhcping') is not None
+            if dhcping_available:
+                print(f"dhcping is available, trying it first...")
+                dhcping_cmd = ['dhcping', '-s', srv, '-c', helper_ip, '-h', client_mac, '-g', helper_ip]
+                dhcping_result = run_cmd(dhcping_cmd, capture_output=True, text=True, check=False)
+                if dhcping_result.returncode == 0:
+                    print(f"dhcping to {srv} successful!")
+                    print(dhcping_result.stdout)
+                    # If dhcping worked, we can skip the scapy packet crafting
+                    print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
+                    continue
+                else:
+                    print(f"dhcping to {srv} failed, falling back to scapy...")
+                    if DEBUG:
+                        print(f"dhcping stderr: {dhcping_result.stderr}")
             
             print(f"DHCP Test Details:")
             print(f"  Interface: {iface} (MAC: {iface_mac})")
