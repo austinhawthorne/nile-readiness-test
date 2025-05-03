@@ -18,6 +18,14 @@ Running this script will test:
     - Will run a sythentic test against a user defined RADIUS server.
 - Required Cloud Reachability for Nile Service
     - Will run a TCP SYN test via NMAP
+- HTTPS and SSL Certificate Tests
+    - Will test HTTPS connectivity to Nile Cloud, Amazon S3, and Nile Secure
+    - Will verify SSL certificates for Nile Cloud and Amazon S3
+- UDP Connectivity Check for Guest Access
+    - Will test UDP connectivity to Guest Access servers on port 6081
+- Additional DNS Resolution Checks
+    - Will test DNS resolution using Google DNS and Cloudflare DNS
+    - Optional custom DNS resolution check
 
 
 This approach allows you to:
@@ -45,6 +53,9 @@ This approach allows you to:
   - dig (DNS lookup utility)
   - ntpdate (NTP utility)
   - curl (HTTPS test utility)
+  - netcat (nc) for UDP connectivity testing
+  - openssl for SSL certificate verification
+  - nslookup for DNS resolution testing
 - Enable Predictable names to make life easier long term since using USB ethernet interfaces
 
 ## Installation
@@ -58,7 +69,7 @@ This approach allows you to:
 2. Install required packages:
    ```
    sudo apt update
-   sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy
+   sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy netcat openssl
    ```
 
    For a Raspberry Pi, I had to add --break-system-packages as shown below to complete the install of dhcppython
@@ -167,6 +178,9 @@ sudo ./nrt.py
 
 - **scapy**: Used for OSPF packet sniffing
 - **dhcppython**: Used for DHCP relay testing (must be installed via pip3)
+- **socket**: Used for hostname resolution and SSL connectivity testing
+- **re**: Used for IP address validation
+- **subprocess**: Used for executing commands like netcat and openssl
 
 ### System Dependencies
 
@@ -177,6 +191,20 @@ sudo ./nrt.py
 - **ntpdate**: For NTP time synchronization testing
 - **curl**: For HTTPS connectivity testing
 - **xterm**: Used by the VNC server
+- **netcat (nc)**: Used for UDP connectivity testing
+- **openssl**: Used for SSL certificate verification
+- **nslookup**: Used for DNS resolution testing
 
 Make sure all dependencies are installed before running the scripts. The installation commands in the Installation section will install all required dependencies.
 
+License
+
+MIT License
+
+Copyright (c) 2025 Nile Global Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

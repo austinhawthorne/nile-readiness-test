@@ -26,6 +26,7 @@ import socket
 import time
 import json
 import argparse
+import re
 from urllib.parse import urlparse
 from scapy.config import conf
 from scapy.all import sniff
@@ -35,6 +36,150 @@ from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
 import dhcppython.client as dhcp_client
 import dhcppython.options as dhcp_options
 import dhcppython.utils as dhcp_utils
+
+# Constants for Nile Connect tests
+NILE_HOSTNAME = "ne-u1.nile-global.cloud"
+S3_HOSTNAME = "s3.us-west-2.amazonaws.com"
+GOOGLE_DNS = "8.8.8.8"
+CLOUDFLARE_DNS = "1.1.1.1"
+GUEST_IPS = ["145.40.90.203", "145.40.64.129", "145.40.113.105"]
+UDP_PORT = 6081
+SSL_PORT = 443
+
+# Validate if a string is a valid IP address
+def is_valid_ip(ip: str) -> bool:
+    """
+    Validate if a string is a valid IP address.
+    
+    Args:
+        ip: String to validate as IP address
+        
+    Returns:
+        bool: True if valid IP address, False otherwise
+    """
+    ip_pattern = r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$'
+    if re.match(ip_pattern, ip):
+        # Ensure each section is between 0 and 255
+        return all(0 <= int(num) <= 255 for num in ip.split('.'))
+    return False
+
+# Check UDP connectivity using netcat
+def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
+    """
+    Check UDP connectivity using netcat (nc -vzu) with a timeout.
+    
+    Args:
+        ip: IP address to check
+        port: UDP port to check (default: 6081)
+        timeout: Timeout in seconds (default: 5)
+        
+    Returns:
+        bool: True if connectivity successful, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            ['nc', '-vzu', ip, str(port)],
+            capture_output=True,
+            text=True,
+            timeout=timeout
+        )
+        
+        # Check for success indicators in output
+        if "open" in result.stderr.lower():
+            return True
+            
+        if result.returncode == 0:
+            return True
+            
+        return False
+    except subprocess.TimeoutExpired:
+        return False
+    except FileNotFoundError:
+        print(f"  Error: netcat (nc) command not found. Please install netcat.")
+        return False
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+# Check SSL certificate
+def check_ssl_certificate(ip: str, hostname: str, expected_org: str) -> bool:
+    """
+    Test SSL certificate validity and organization.
+    
+    Args:
+        ip: IP address to check
+        hostname: Hostname for SNI
+        expected_org: Expected organization in certificate issuer
+        
+    Returns:
+        bool: True if SSL certificate is valid and contains expected organization, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            ['openssl', 's_client', '-connect', f'{ip}:{SSL_PORT}', '-servername', hostname],
+            capture_output=True,
+            text=True
+        )
+        
+        if "issuer=" in result.stdout:
+            issuer_start = result.stdout.find("issuer=")
+            issuer_end = result.stdout.find("\n", issuer_start)
+            issuer = result.stdout[issuer_start:issuer_end].strip()
+            
+            # Check if issuer contains the expected organization
+            if expected_org not in issuer:
+                return False
+                
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+# Check DNS resolution
+def check_dns_resolution(hostname: str, dns_server: str) -> bool:
+    """
+    Test DNS resolution using specified DNS server.
+    
+    Args:
+        hostname: Hostname to resolve
+        dns_server: DNS server to use
+        
+    Returns:
+        bool: True if DNS resolution successful, False otherwise
+    """
+    try:
+        result = subprocess.run(
+            ['nslookup', hostname, dns_server],
+            capture_output=True,
+            text=True
+        )
+        
+        if "Non-authoritative" in result.stdout or "Address" in result.stdout:
+            return True
+        else:
+            return False
+    except Exception as e:
+        print(f"  Error: {e}")
+        return False
+
+# Resolve all IPs for a hostname
+def resolve_all_ips(hostname: str) -> list:
+    """
+    Resolve all IP addresses for a hostname.
+    
+    Args:
+        hostname: Hostname to resolve
+        
+    Returns:
+        List[str]: List of IP addresses
+    """
+    try:
+        return socket.gethostbyname_ex(hostname)[2]
+    except socket.gaierror as e:
+        print(f"DNS resolution failed for {hostname}: {e}")
+        return []
 
 # Parse command line arguments
 def parse_args():
@@ -378,7 +523,7 @@ def show_ospf_status():
     return success
 
 # Add floating static default
-def configure_static_route(gateway,iface):
+def configure_static_route(gateway, iface):
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
 
 # Connectivity tests with DNS fallback logic
@@ -577,22 +722,130 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
         test_results.append((f'NTP {ntp}', result))
 
-    # HTTPS - using socket.create_connection like the original
-    print(f'=== HTTPS tests ===')
-    for url in ('https://u1.nilesecure.com',
-                'https://ne-u1.nile-global.cloud',
-                'https://s3.us-west-2.amazonaws.com/nile-prod-us-west-2'):
-        parsed = urlparse(url)
-        host, port = parsed.hostname, parsed.port or 443
-        try:
-            sock = socket.create_connection((host, port), timeout=5)
-            sock.close()
-            ok = True
-        except:
-            ok = False
-        print(f'HTTPS {url}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-        test_results.append((f'HTTPS {url}', ok))
-
+    # HTTPS and SSL Certificate tests
+    print(f'=== HTTPS and SSL Certificate tests ===')
+    
+    # Test HTTPS connectivity and SSL certificates for Nile Cloud
+    print(f'Testing HTTPS and SSL for {NILE_HOSTNAME}...')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME}: {GREEN}Success{RESET}')
+    except:
+        https_ok = False
+        print(f'HTTPS {NILE_HOSTNAME}: {RED}Fail{RESET}')
+    test_results.append((f'HTTPS {NILE_HOSTNAME}', https_ok))
+    
+    # Now check the SSL certificate
+    print(f'Checking SSL certificate for {NILE_HOSTNAME}...')
+    nile_ips = resolve_all_ips(NILE_HOSTNAME)
+    if nile_ips:
+        print(f"Resolved {NILE_HOSTNAME} to: {', '.join(nile_ips)}")
+        nile_ssl_success = False
+        for ip in nile_ips:
+            if check_ssl_certificate(ip, NILE_HOSTNAME, "Nile Global Inc."):
+                nile_ssl_success = True
+                print(f"SSL certificate for {NILE_HOSTNAME}: {GREEN}Success{RESET}")
+                break
+            else:
+                print(f"SSL certificate for {NILE_HOSTNAME} (IP: {ip}): {RED}Fail{RESET}")
+        test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", nile_ssl_success))
+    else:
+        print(f"Could not resolve {NILE_HOSTNAME} for SSL check")
+        test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", False))
+    
+    # Test HTTPS connectivity and SSL certificates for Amazon S3
+    print(f'\nTesting HTTPS and SSL for {S3_HOSTNAME}...')
+    parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {S3_HOSTNAME}: {GREEN}Success{RESET}')
+    except:
+        https_ok = False
+        print(f'HTTPS {S3_HOSTNAME}: {RED}Fail{RESET}')
+    test_results.append((f'HTTPS {S3_HOSTNAME}', https_ok))
+    
+    # Now check the SSL certificate
+    print(f'Checking SSL certificate for {S3_HOSTNAME}...')
+    s3_ips = resolve_all_ips(S3_HOSTNAME)
+    if s3_ips:
+        print(f"Resolved {S3_HOSTNAME} to: {', '.join(s3_ips)}")
+        s3_ssl_success = False
+        # Only test the first 2 IPs for S3
+        for ip in s3_ips[:2]:
+            if check_ssl_certificate(ip, S3_HOSTNAME, "Amazon"):
+                s3_ssl_success = True
+                print(f"SSL certificate for {S3_HOSTNAME}: {GREEN}Success{RESET}")
+                break
+            else:
+                print(f"SSL certificate for {S3_HOSTNAME} (IP: {ip}): {RED}Fail{RESET}")
+        test_results.append((f"SSL Certificate for {S3_HOSTNAME}", s3_ssl_success))
+    else:
+        print(f"Could not resolve {S3_HOSTNAME} for SSL check")
+        test_results.append((f"SSL Certificate for {S3_HOSTNAME}", False))
+    
+    # Test HTTPS connectivity for Nile Secure
+    print(f'\nTesting HTTPS for u1.nilesecure.com...')
+    parsed = urlparse('https://u1.nilesecure.com')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.create_connection((host, port), timeout=5)
+        sock.close()
+        https_ok = True
+        print(f'HTTPS u1.nilesecure.com: {GREEN}Success{RESET}')
+    except:
+        https_ok = False
+        print(f'HTTPS u1.nilesecure.com: {RED}Fail{RESET}')
+    test_results.append((f'HTTPS u1.nilesecure.com', https_ok))
+    
+    # UDP Connectivity Check for Guest Access
+    print(f'\n=== UDP Connectivity Check ===')
+    guest_success = False
+    for ip in GUEST_IPS:
+        print(f"Testing UDP connectivity to {ip}:{UDP_PORT}...")
+        if check_udp_connectivity_netcat(ip, UDP_PORT):
+            guest_success = True
+            print(f"UDP connectivity to {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+            break
+        else:
+            print(f"UDP connectivity to {ip}:{UDP_PORT}: {RED}Fail{RESET}")
+    test_results.append(("UDP Connectivity for Guest Access", guest_success))
+    
+    # Additional DNS Resolution Checks
+    print(f'\n=== Additional DNS Resolution Checks ===')
+    
+    # Test with Google DNS if not already used
+    if GOOGLE_DNS not in dns_servers:
+        print(f"Testing DNS resolution using Google DNS ({GOOGLE_DNS})...")
+        google_dns_success = check_dns_resolution(NILE_HOSTNAME, GOOGLE_DNS)
+        print(f"DNS resolution using Google DNS: " + (GREEN+'Success'+RESET if google_dns_success else RED+'Fail'+RESET))
+        test_results.append(("DNS Resolution using Google DNS", google_dns_success))
+    
+    # Test with Cloudflare DNS if not already used
+    if CLOUDFLARE_DNS not in dns_servers:
+        print(f"Testing DNS resolution using Cloudflare DNS ({CLOUDFLARE_DNS})...")
+        cloudflare_dns_success = check_dns_resolution(NILE_HOSTNAME, CLOUDFLARE_DNS)
+        print(f"DNS resolution using Cloudflare DNS: " + (GREEN+'Success'+RESET if cloudflare_dns_success else RED+'Fail'+RESET))
+        test_results.append(("DNS Resolution using Cloudflare DNS", cloudflare_dns_success))
+    
+    # Custom DNS Resolution Check (optional)
+    custom_dns = input('Perform custom DNS resolution test? [y/N]: ').strip().lower()
+    if custom_dns.startswith('y'):
+        custom_dns_server = prompt_nonempty('Enter custom DNS server IP: ')
+        if is_valid_ip(custom_dns_server):
+            print(f"Testing DNS resolution using custom DNS ({custom_dns_server})...")
+            custom_dns_success = check_dns_resolution(NILE_HOSTNAME, custom_dns_server)
+            print(f"DNS resolution using custom DNS: " + (GREEN+'Success'+RESET if custom_dns_success else RED+'Fail'+RESET))
+            test_results.append((f"DNS Resolution using custom DNS ({custom_dns_server})", custom_dns_success))
+        else:
+            print(f"Invalid IP address: {custom_dns_server}")
+    
     return test_results
 
 # Print test summary
