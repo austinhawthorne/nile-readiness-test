@@ -593,7 +593,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f'HTTPS {url}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
         test_results.append((f'HTTPS {url}', ok))
 
-    # Print test summary
+    return test_results
+
+# Print test summary
+def print_test_summary(test_results):
     print("\n=== Test Summary ===")
     success_count = 0
     total_count = len(test_results)
@@ -606,8 +609,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     success_rate = (success_count / total_count) * 100 if total_count > 0 else 0
     print(f"\nOverall: {success_count}/{total_count} tests passed ({success_rate:.1f}%)")
-    
-    return test_results
 
 # Main flow
 def main():
@@ -649,6 +650,10 @@ def main():
     finally:
         # Restore the original state
         restore_state(frr_iface, state)
+        
+        # Print test summary after restoring state
+        if 'test_results' in locals():
+            print_test_summary(test_results)
 
 if __name__=='__main__':
     if os.geteuid()!=0:
