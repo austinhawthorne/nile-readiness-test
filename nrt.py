@@ -41,7 +41,6 @@ import dhcppython.utils as dhcp_utils
 NILE_HOSTNAME = "ne-u1.nile-global.cloud"
 S3_HOSTNAME = "s3.us-west-2.amazonaws.com"
 GOOGLE_DNS = "8.8.8.8"
-CLOUDFLARE_DNS = "1.1.1.1"
 GUEST_IPS = ["145.40.90.203", "145.40.64.129", "145.40.113.105"]
 UDP_PORT = 6081
 SSL_PORT = 443
@@ -827,12 +826,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f"DNS resolution using Google DNS: " + (GREEN+'Success'+RESET if google_dns_success else RED+'Fail'+RESET))
         test_results.append(("DNS Resolution using Google DNS", google_dns_success))
     
-    # Test with Cloudflare DNS if not already used
-    if CLOUDFLARE_DNS not in dns_servers:
-        print(f"Testing DNS resolution using Cloudflare DNS ({CLOUDFLARE_DNS})...")
-        cloudflare_dns_success = check_dns_resolution(NILE_HOSTNAME, CLOUDFLARE_DNS)
-        print(f"DNS resolution using Cloudflare DNS: " + (GREEN+'Success'+RESET if cloudflare_dns_success else RED+'Fail'+RESET))
-        test_results.append(("DNS Resolution using Cloudflare DNS", cloudflare_dns_success))
     
     # Custom DNS Resolution Check (optional)
     custom_dns = input('Perform custom DNS resolution test? [y/N]: ').strip().lower()

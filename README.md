@@ -24,7 +24,7 @@ Running this script will test:
 - UDP Connectivity Check for Guest Access
     - Will test UDP connectivity to Guest Access servers on port 6081
 - Additional DNS Resolution Checks
-    - Will test DNS resolution using Google DNS and Cloudflare DNS
+    - Will test DNS resolution using Google DNS
     - Optional custom DNS resolution check
 
 
@@ -69,7 +69,7 @@ This approach allows you to:
 2. Install required packages:
    ```
    sudo apt update
-   sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy netcat openssl
+   sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy netcat-openbsd openssl
    ```
 
    For a Raspberry Pi, I had to add --break-system-packages as shown below to complete the install of dhcppython
