@@ -434,9 +434,14 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
     # DHCP relay with ping pre-check - using scapy like the original
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
-        # Use the first IP of the client subnet as the helper IP
+        # Use the first IP of the client subnet as the helper IP (giaddr)
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
         print(f"Using client subnet first IP {helper_ip} as DHCP relay agent (giaddr)")
+        
+        # For the source IP, we should use the interface IP address
+        # This is what the server will see as the source of the packet
+        source_ip = ip_addr
+        print(f"Using interface IP {source_ip} as source IP for DHCP packets")
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
@@ -487,7 +492,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             
             # Create the packet with broadcast flag set
             pkt = (Ether(src=iface_mac, dst='ff:ff:ff:ff:ff:ff')/
-                  IP(src=helper_ip, dst=srv)/
+                  IP(src=source_ip, dst=srv)/
                   UDP(sport=67, dport=67)/
                   BOOTP(op=1, chaddr=client_mac, xid=xid, giaddr=helper_ip, flags=0x8000)/
                   DHCP(options=[('message-type','discover'), ('end')]))
