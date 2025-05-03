@@ -525,10 +525,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 print(f"Successfully obtained DHCP lease!")
                 if DEBUG:
                     print(f"DEBUG: Lease details:")
-                    print(f"  Your IP: {lease.yiaddr}")
-                    print(f"  Server IP: {lease.siaddr}")
-                    print(f"  Gateway: {lease.giaddr}")
-                    print(f"  Options: {lease.options}")
+                    print(f"  Your IP: {lease.ack.yiaddr}")
+                    print(f"  Server IP: {lease.ack.siaddr}")
+                    print(f"  Gateway: {lease.ack.giaddr}")
+                    print(f"  Options: {lease.ack.options}")
                 
                 print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
                 
