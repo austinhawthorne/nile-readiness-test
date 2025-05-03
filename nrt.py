@@ -383,6 +383,8 @@ def configure_static_route(gateway,iface):
 
 # Connectivity tests with DNS fallback logic
 def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
+    # Dictionary to store test results for summary
+    test_results = []
     # Set initial DNS
     dns_servers = ['8.8.8.8', '8.8.4.4']
     
@@ -399,18 +401,21 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f'Initial Ping Tests:')
     for tgt in dns_servers:
         r = run_cmd(['ping', '-c', '2', tgt], capture_output=True)
-        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
-        ping_ok |= (r.returncode==0)
+        result = r.returncode == 0
+        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'Initial Ping {tgt}', result))
+        ping_ok |= result
 
-    # Initial DNS tests with retry prompt
-    while True:
-        print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
-        dns_ok = False
-        for d in dns_servers:
-            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
-            ok = (r.returncode==0 and bool(r.stdout.strip()))
-            print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-            dns_ok |= ok
+        # Initial DNS tests with retry prompt
+        while True:
+            print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
+            dns_ok = False
+            for d in dns_servers:
+                r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+                ok = (r.returncode==0 and bool(r.stdout.strip()))
+                print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+                test_results.append((f'Initial DNS @{d}', ok))
+                dns_ok |= ok
         if dns_ok:
             break
         ans = input('Default DNS tests failed. Enter alternate DNS servers? [y/N]: ').strip().lower()
@@ -429,11 +434,14 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f'\nFull Test Suite:')
     for tgt in dns_servers:
         r = run_cmd(['ping', '-c', '4', tgt], capture_output=True, text=True)
-        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
+        result = r.returncode == 0
+        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'Ping {tgt}', result))
     for d in dns_servers:
         r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'DNS @{d}', ok))
 
     # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
@@ -450,7 +458,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
             if p.returncode != 0:
+                result = False
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
+                test_results.append((f'DHCP relay to {srv}', result))
                 continue
             
             # Get the MAC address for the main interface
@@ -516,13 +526,17 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                         print(f"  Gateway: {lease.ack.giaddr}")
                         print(f"  Options: {lease.ack.options}")
                     
+                    result = True
                     print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
+                    test_results.append((f'DHCP relay to {srv}', result))
                 except Exception as e:
                     print(f"Error during DHCP lease request: {e}")
                     if DEBUG:
                         import traceback
                         traceback.print_exc()
+                    result = False
                     print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
+                    test_results.append((f'DHCP relay to {srv}', result))
                 
                 
             except Exception as e:
@@ -530,7 +544,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 if DEBUG:
                     import traceback
                     traceback.print_exc()
+                result = False
                 print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
+                test_results.append((f'DHCP relay to {srv}', result))
     else:
         print('Skipping DHCP tests')
 
@@ -540,12 +556,16 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         for srv in radius_servers:
             p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
+                result = False
                 print(f'RADIUS {srv}: {RED}Fail (unreachable){RESET}')
+                test_results.append((f'RADIUS {srv}', result))
                 continue
             cmd = (f'echo "User-Name={user},User-Password={pwd}" '
                   f'| radclient -x -s {srv}:1812 auth {secret}')
             res = run_cmd(cmd, shell=True, capture_output=True, text=True)
-            print(f'RADIUS {srv}: ' + (GREEN+'Success'+RESET if res.returncode==0 else RED+'Fail'+RESET))
+            result = res.returncode == 0
+            print(f'RADIUS {srv}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'RADIUS {srv}', result))
     else:
         print('Skipping RADIUS tests')
 
@@ -553,7 +573,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f'=== NTP tests ===')
     for ntp in ('time.google.com', 'pool.ntp.org'):
         r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
-        print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if r.returncode==0 else RED+'Fail'+RESET))
+        result = r.returncode == 0
+        print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'NTP {ntp}', result))
 
     # HTTPS - using socket.create_connection like the original
     print(f'=== HTTPS tests ===')
@@ -569,6 +591,23 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         except:
             ok = False
         print(f'HTTPS {url}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'HTTPS {url}', ok))
+
+    # Print test summary
+    print("\n=== Test Summary ===")
+    success_count = 0
+    total_count = len(test_results)
+    
+    for test_name, result in test_results:
+        status = GREEN + "Success" + RESET if result else RED + "Fail" + RESET
+        print(f"{test_name}: {status}")
+        if result:
+            success_count += 1
+    
+    success_rate = (success_count / total_count) * 100 if total_count > 0 else 0
+    print(f"\nOverall: {success_count}/{total_count} tests passed ({success_rate:.1f}%)")
+    
+    return test_results
 
 # Main flow
 def main():
@@ -605,7 +644,7 @@ def main():
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
         
         # Run connectivity tests
-        run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
+        test_results = run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
     
     finally:
         # Restore the original state
