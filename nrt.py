@@ -406,16 +406,16 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         test_results.append((f'Initial Ping {tgt}', result))
         ping_ok |= result
 
-        # Initial DNS tests with retry prompt
-        while True:
-            print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
-            dns_ok = False
-            for d in dns_servers:
-                r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
-                ok = (r.returncode==0 and bool(r.stdout.strip()))
-                print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-                test_results.append((f'Initial DNS @{d}', ok))
-                dns_ok |= ok
+    # Initial DNS tests with retry prompt
+    while True:
+        print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
+        dns_ok = False
+        for d in dns_servers:
+            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+            ok = (r.returncode==0 and bool(r.stdout.strip()))
+            print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Initial DNS @{d}', ok))
+            dns_ok |= ok
         if dns_ok:
             break
         ans = input('Default DNS tests failed. Enter alternate DNS servers? [y/N]: ').strip().lower()
