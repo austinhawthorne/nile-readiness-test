@@ -18,6 +18,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 - Python 3.6+ with required packages:
   - scapy
   - ipaddress
+  - dhcppython
 - Required utilities:
   - vtysh (FRR)
   - radclient (FreeRADIUS client)
@@ -37,6 +38,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
    ```
    sudo apt update
    sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress
+   pip3 install dhcppython
    ```
 
    For TigerVNC:
@@ -125,7 +127,7 @@ The script will:
 4. Configure OSPF using vtysh commands directly
 5. Actively wait for OSPF state Full/DR with a 30-second timeout
 6. Add the default route after OSPF has established
-7. Run connectivity tests (ping, DNS, DHCP, RADIUS, NTP, HTTPS)
+7. Run connectivity tests (ping, DNS, DHCP relay using dhcppython, RADIUS, NTP, HTTPS)
 8. Restore the original state when done
 
 ## Troubleshooting
@@ -171,6 +173,13 @@ The script will:
 - If OSPF adjacency fails, check if the upstream router is sending OSPF Hello packets
 - Verify that the FRR interface has the correct IP address and can reach the upstream router
 - Check FRR logs: `sudo tail -f /var/log/frr/zebra.log /var/log/frr/ospfd.log`
+
+### DHCP Test Issues
+
+- The DHCP testing now uses the dhcppython library for more reliable DHCP relay testing
+- If DHCP tests fail, check if the DHCP server is reachable with ping
+- Verify that the helper IP (giaddr) is correctly set to the first IP of the client subnet
+- For debugging, run with the `--debug` flag to see detailed DHCP packet information
 
 ## Notes
 

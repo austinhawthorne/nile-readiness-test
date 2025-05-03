@@ -28,8 +28,8 @@ import json
 import argparse
 from urllib.parse import urlparse
 from scapy.config import conf
-from scapy.all import sniff, sendp, RandMAC, Ether, BOOTP, DHCP
-from scapy.layers.inet import IP, UDP
+from scapy.all import sniff
+from scapy.layers.inet import IP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
@@ -442,10 +442,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
         print(f"Using client subnet first IP {helper_ip} as DHCP relay agent (giaddr)")
         
-        # For the source IP, we should use the interface IP address
+        # For the source IP, we should use the helper IP address (giaddr)
         # This is what the server will see as the source of the packet
-        source_ip = ip_addr
-        print(f"Using interface IP {source_ip} as source IP for DHCP packets")
+        source_ip = helper_ip
+        print(f"Using helper IP {source_ip} as source IP for DHCP packets")
         
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
@@ -468,22 +468,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             # Create a random client MAC address
             client_mac = dhcp_utils.random_mac()
             
-            # Try using dhcping if available
-            dhcping_available = shutil.which('dhcping') is not None
-            if dhcping_available:
-                print(f"dhcping is available, trying it first...")
-                dhcping_cmd = ['dhcping', '-s', srv, '-c', helper_ip, '-h', client_mac, '-g', helper_ip]
-                dhcping_result = run_cmd(dhcping_cmd, capture_output=True, text=True, check=False)
-                if dhcping_result.returncode == 0:
-                    print(f"dhcping to {srv} successful!")
-                    print(dhcping_result.stdout)
-                    # If dhcping worked, we can skip the dhcppython client
-                    print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
-                    continue
-                else:
-                    print(f"dhcping to {srv} failed, falling back to dhcppython...")
-                    if DEBUG:
-                        print(f"dhcping stderr: {dhcping_result.stderr}")
+            # Using dhcppython for DHCP testing
             
             print(f"DHCP Test Details:")
             print(f"  Interface: {iface} (MAC: {iface_mac})")
@@ -492,10 +477,11 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             print(f"  Client MAC: {client_mac}")
             
             try:
-                # Create DHCP client
-                print(f"Creating DHCP client...")
+                # Create DHCP client using the dummy_client interface
+                print(f"Creating DHCP client on dummy_client interface...")
+                client_iface = "dummy_client"
                 c = dhcp_client.DHCPClient(
-                    iface,
+                    client_iface,
                     send_from_port=67,  # Server port (for relay)
                     send_to_port=67     # Server port
                 )
