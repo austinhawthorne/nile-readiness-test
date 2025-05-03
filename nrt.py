@@ -765,12 +765,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f"Preparing {mgmt1_ip} to send tests...")
     time.sleep(4)
 
-    # Send initial pings to prepare loopback interface (output suppressed except in debug mode)
-    '''
-    for tgt in dns_servers:
-        run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
-    '''
-    
     # Ping tests
     print(f'\n=== Ping tests ===')
     for tgt in dns_servers:
