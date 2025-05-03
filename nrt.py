@@ -370,20 +370,72 @@ def record_state(iface):
 
 def restore_state(iface, state):
     print('\nRestoring original state...')
-    run_cmd(['ip','addr','flush','dev',iface], check=True)
-    for addr in state['addrs']:
-        run_cmd(['ip','addr','add',addr,'dev',iface], check=True)
-    run_cmd(['ip','route','flush','default'], check=True)
-    for r in state['routes']:
-        parts = r.split()
-        run_cmd(['ip','route','add'] + parts, check=True)
+    
+    # First, remove dummy interfaces
+    print("Removing dummy interfaces...")
     for name in ('mgmt1','mgmt2','client'):
         run_cmd(['ip','link','delete',f'dummy_{name}'], check=False)
+    
+    # Flush the interface
+    print(f"Flushing interface {iface}...")
+    run_cmd(['ip','addr','flush','dev',iface], check=True)
+    
+    # Apply a temporary IP configuration if there are no addresses in the state
+    # This helps with the "Nexthop has invalid gateway" error
+    if not state['addrs']:
+        print("No original addresses found, applying temporary IP configuration...")
+        run_cmd(['ip','addr','add','10.200.1.2/30','dev',iface], check=False)
+        run_cmd(['ip','link','set','dev',iface,'up'], check=False)
+    
+    # Add back the original addresses
+    print("Restoring original IP addresses...")
+    for addr in state['addrs']:
+        run_cmd(['ip','addr','add',addr,'dev',iface], check=False)
+    
+    # Make sure the interface is up
+    print(f"Ensuring interface {iface} is up...")
+    run_cmd(['ip','link','set','dev',iface,'up'], check=False)
+    
+    # Flush default routes
+    print("Flushing default routes...")
+    run_cmd(['ip','route','flush','default'], check=False)
+    
+    # Add back the original routes with error handling
+    print("Restoring original routes...")
+    for r in state['routes']:
+        parts = r.split()
+        try:
+            # Try to add the route
+            run_cmd(['ip','route','add'] + parts, check=False)
+        except Exception as e:
+            print(f"Warning: Could not restore route {' '.join(parts)}: {e}")
+            # If the route has a gateway, try to add a direct route to the gateway first
+            if 'via' in parts:
+                gateway_index = parts.index('via') + 1
+                if gateway_index < len(parts):
+                    gateway = parts[gateway_index]
+                    print(f"Attempting to add direct route to gateway {gateway}...")
+                    try:
+                        run_cmd(['ip','route','add',gateway,'dev',iface], check=False)
+                        # Try adding the original route again
+                        run_cmd(['ip','route','add'] + parts, check=False)
+                    except Exception as e2:
+                        print(f"Warning: Could not add direct route to gateway {gateway}: {e2}")
+    
+    # Restore FRR configuration
+    print("Restoring FRR configuration...")
     with open('/etc/frr/daemons','w') as f: f.write(state['daemons'])
     run_cmd(['rm','-f','/etc/frr/frr.conf'], check=False)
+    
+    # Restore DNS configuration
+    print("Restoring DNS configuration...")
     with open('/etc/resolv.conf','w') as f: f.write(state['resolv'])
+    
+    # Stop and disable FRR
+    print("Stopping and disabling FRR...")
     run_cmd(['systemctl','stop','frr'], check=False)
     run_cmd(['systemctl','disable','frr'], check=False)
+    
     print('Removed FRR config, stopped service, restored DNS.')
 
 # Configure main interface
