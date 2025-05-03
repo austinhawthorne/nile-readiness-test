@@ -8,23 +8,23 @@ Running this script will test:
     - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency and advertise routes for defined subnets (NSB, Sensor, Client).
     - Will fall back to static if this fails.
 - DNS Reachability
-    - Will try the default DNS servers for Nile.
+    - Will try the default DNS servers for Nile
     - If that fails, will prompt for a user specified DNS server to use.
 - NTP Reachability
-    - Will run a test to sync with default Nile defined NTP servers
+    - Will run a test to sync with default Nile defined NTP servers from the NSB Gateway IP Address and NSB Subnet IP Address
 - DHCP Server Reachability
     - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
 - RADIUS Reachability
     - Will run a sythentic test against a user defined RADIUS server.
 - Required Cloud Reachability for Nile Service
-    - Will run a TCP SYN test via NMAP
+    - Will run a socket connect from the NSB Gateway IP Address and NSB Subnet IP Address
 - HTTPS and SSL Certificate Tests
-    - Will test HTTPS connectivity to Nile Cloud, Amazon S3, and Nile Secure
+    - Will test HTTPS connectivity to Nile Cloud, Amazon S3, and Nile Secure from the NSB Gateway IP Address and NSB Subnet IP Address
     - Will verify SSL certificates for Nile Cloud and Amazon S3
 - UDP Connectivity Check for Guest Access
     - Will test UDP connectivity to Guest Access servers on port 6081
 - Additional DNS Resolution Checks
-    - Will test DNS resolution using Google DNS
+    - Will test DNS resolution using Google DNS from the NSB Subnet IP Address
     - Will use any custom DNS servers provided during initial DNS tests
     - Optional additional custom DNS resolution check
 

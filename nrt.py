@@ -761,11 +761,15 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     mgmt1_ip = str(ipaddress.IPv4Network(mgmt1).network_address+1)
     print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
     
-    # Send initial pings to prepare loopback interface (output suppressed except in debug mode)
+    # Wait a bit more to ensure stability
     print(f"Preparing {mgmt1_ip} to send tests...")
+    time.sleep(4)
+
+    # Send initial pings to prepare loopback interface (output suppressed except in debug mode)
+    '''
     for tgt in dns_servers:
         run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
-    time.sleep(2)
+    '''
     
     # Ping tests
     print(f'\n=== Ping tests ===')
