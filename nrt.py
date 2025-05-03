@@ -763,6 +763,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Wait a bit more to ensure stability
     print(f"Preparing {mgmt1_ip} to send tests...")
+    run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=False, text=False)
     time.sleep(4)
 
     # Ping tests
@@ -801,8 +802,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         # This is what the server will see as the source of the packet
         source_ip = helper_ip
         print(f"Using helper IP {source_ip} as source IP for DHCP packets")
-        run_cmd(['ping', '-c', '5', srv], capture_output=True)
-
+        
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
             if p.returncode != 0:
