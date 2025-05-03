@@ -400,12 +400,22 @@ def configure_interface(iface, ip_addr, netmask):
             interface_name = line.split(': ')[1].split('@')[0]
             interfaces.append(interface_name)
     
+    # Check for and clean up dummy interfaces from previous runs
+    print("Checking for dummy interfaces from previous runs...")
+    dummy_interfaces = ['dummy_mgmt1', 'dummy_mgmt2', 'dummy_client']
+    for dummy in dummy_interfaces:
+        if dummy in interfaces:
+            print(f"Removing leftover dummy interface {dummy}...")
+            run_cmd(['ip', 'link', 'delete', dummy], check=False)
+    
     # Disable all interfaces except end0 and loopback
     print("Disabling all interfaces except end0 and loopback...")
     for interface in interfaces:
         if interface != 'end0' and interface != 'lo' and interface != iface:
-            print(f"Disabling interface {interface}...")
-            run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+            # Skip dummy interfaces as we've already handled them
+            if not interface.startswith('dummy_'):
+                print(f"Disabling interface {interface}...")
+                run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
     
     # Configure the specified interface
     print(f'Configuring {iface}...')
