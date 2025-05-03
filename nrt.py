@@ -408,22 +408,40 @@ def configure_interface(iface, ip_addr, netmask):
             print(f"Removing leftover dummy interface {dummy}...")
             run_cmd(['ip', 'link', 'delete', dummy], check=False)
     
-    # Disable all interfaces except end0 and loopback
-    print("Disabling all interfaces except end0 and loopback...")
-    for interface in interfaces:
-        if interface != 'end0' and interface != 'lo' and interface != iface:
-            # Skip dummy interfaces as we've already handled them
-            if not interface.startswith('dummy_'):
-                print(f"Disabling interface {interface}...")
+    # Disable all interfaces except loopback and end0 (management interface)
+    print("Disabling all interfaces except loopback and end0 (management interface)...")
+    interfaces_to_disable = [interface for interface in interfaces 
+                            if interface != 'lo' and interface != 'end0' and not interface.startswith('dummy_')]
+    
+    # First attempt to disable all interfaces
+    for interface in interfaces_to_disable:
+        print(f"Disabling interface {interface}...")
+        run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+    
+    # Verify interfaces are actually down and retry if needed
+    print("Verifying interfaces are down...")
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        all_down = True
+        interfaces_output = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+        for interface in interfaces_to_disable:
+            # Check if interface is still up
+            if f"{interface}: " in interfaces_output and "state UP" in interfaces_output.split(f"{interface}: ")[1].split("\n")[0]:
+                print(f"Interface {interface} is still up, retrying...")
                 run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+                all_down = False
+        
+        if all_down:
+            print("All interfaces successfully disabled.")
+            break
+        
+        if attempt < max_attempts - 1:
+            print(f"Some interfaces still up. Waiting before retry {attempt+1}/{max_attempts}...")
+            time.sleep(2)
     
     # Configure the specified interface
     print(f'Configuring {iface}...')
     prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-    
-    # First disable the interface
-    print(f"Disabling {iface} before configuration...")
-    run_cmd(['ip', 'link', 'set', 'dev', iface, 'down'], check=False)
     
     # Then flush and configure
     print(f"Flushing and configuring {iface}...")
