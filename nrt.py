@@ -431,7 +431,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
-    # DHCP relay with ping pre-check
+    # DHCP relay with ping pre-check - using scapy like the original
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
@@ -441,33 +441,25 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Use original DHCP packet crafting code
+            # Use scapy to craft and send DHCP packets
             xid = random.randint(1, 0xffffffff)
             pkt = (Ether(dst='ff:ff:ff:ff:ff:ff')/
                   IP(src=helper_ip, dst=srv)/
                   UDP(sport=67, dport=67)/
                   BOOTP(op=1, chaddr=RandMAC(), xid=xid, giaddr=helper_ip)/
-                  DHCP(options=[('message-type', 'discover'), ('end')]))
-            
+                  DHCP(options=[('message-type','discover'), ('end')]))
             if DEBUG:
                 print('DEBUG: DHCP DISCOVER summary:')
                 print(pkt.summary())
-                print(f'DEBUG: Transaction ID (xid): {hex(xid)}')
-            
-            # Send the packet
             sendp(pkt, iface=iface, verbose=False)
-            
-            # Use original sniffing code
             resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
-                        timeout=30, count=1,
-                        lfilter=lambda p: p.haslayer(BOOTP) and
-                                      p[BOOTP].xid == xid and
-                                      p[BOOTP].op == 2)
-            
+                        timeout=20, count=1,
+                        lfilter=lambda p: p.haslayer(BOOTP)
+                                      and p[BOOTP].xid==xid
+                                      and p[BOOTP].op==2)
             if DEBUG:
                 print(f'DEBUG: DHCP response count: {len(resp)}')
                 for p in resp: print(p.summary())
-            
             print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if resp else RED+'Fail'+RESET))
     else:
         print('Skipping DHCP tests')
