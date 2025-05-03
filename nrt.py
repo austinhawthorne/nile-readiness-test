@@ -260,6 +260,7 @@ def get_user_input(config_file=None):
         ip_addr = config.get('ip_address')
         netmask = config.get('netmask')
         gateway = config.get('gateway')
+        mgmt_interface = config.get('mgmt_interface', 'end0')
         mgmt1 = config.get('nsb_subnet')
         mgmt2 = config.get('sensor_subnet')
         client_subnet = config.get('client_subnet')
@@ -341,6 +342,7 @@ def get_user_input(config_file=None):
         ip_addr       = prompt_nonempty('IP address for FRR interface: ')
         netmask       = prompt_nonempty('Netmask (e.g. 255.255.255.0): ')
         gateway       = prompt_nonempty('Gateway IP: ')
+        mgmt_interface = prompt_nonempty('Management interface to keep enabled (default: end0): ') or 'end0'
         mgmt1         = prompt_nonempty('NSB subnet (CIDR, e.g. 192.168.1.0/24): ')
         mgmt2         = prompt_nonempty('Sensor subnet (CIDR): ')
         client_subnet = prompt_nonempty('Client subnet (CIDR): ')
@@ -384,7 +386,7 @@ def get_user_input(config_file=None):
     if custom_ntp_servers:
         print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
     
-    return (frr_iface, ip_addr, netmask, gateway,
+    return (frr_iface, ip_addr, netmask, gateway, mgmt_interface,
             mgmt1, mgmt2, client_subnet,
             dhcp_servers, radius_servers, secret, username, password,
             run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
@@ -473,7 +475,7 @@ def restore_state(iface, state):
     print('Removed FRR config, stopped service, restored DNS.')
 
 # Configure main interface
-def configure_interface(iface, ip_addr, netmask):
+def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
     print(f'Configuring {iface} → {ip_addr}/{netmask}')
     
     # Get a list of all network interfaces
@@ -494,10 +496,19 @@ def configure_interface(iface, ip_addr, netmask):
             print(f"Removing leftover dummy interface {dummy}...")
             run_cmd(['ip', 'link', 'delete', dummy], check=False)
     
-    # Disable all interfaces except loopback and end0 (management interface)
-    print("Disabling all interfaces except loopback and end0 (management interface)...")
+    # Check if management interface has a default gateway and remove it
+    if mgmt_interface in interfaces and mgmt_interface != iface:
+        print(f"Checking if management interface {mgmt_interface} has a default gateway...")
+        route_output = run_cmd(['ip', 'route', 'show', 'dev', mgmt_interface], capture_output=True, text=True).stdout
+        if 'default' in route_output:
+            print(f"Removing default gateway from management interface {mgmt_interface}...")
+            run_cmd(['ip', 'route', 'del', 'default', 'dev', mgmt_interface], check=False)
+            print(f"Default gateway removed from {mgmt_interface}")
+    
+    # Disable all interfaces except loopback and management interface
+    print(f"Disabling all interfaces except loopback and {mgmt_interface} (management interface)...")
     interfaces_to_disable = [interface for interface in interfaces 
-                            if interface != 'lo' and interface != 'end0' and not interface.startswith('dummy_')]
+                            if interface != 'lo' and interface != mgmt_interface and not interface.startswith('dummy_')]
     
     # First attempt to disable all interfaces
     for interface in interfaces_to_disable:
@@ -1120,7 +1131,8 @@ def print_test_summary(test_results):
 # Main flow
 def main():
     # Get user input from config file or interactive prompts
-    (frr_iface, ip_addr, netmask, gateway, mgmt1, mgmt2, client_subnet,
+    (frr_iface, ip_addr, netmask, gateway, mgmt_interface,
+     mgmt1, mgmt2, client_subnet,
      dhcp_servers, radius_servers, secret, username, password,
      run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers) = get_user_input(args.config)
     
@@ -1135,7 +1147,7 @@ def main():
     
     try:
         # Configure the interface
-        configure_interface(frr_iface, ip_addr, netmask)
+        configure_interface(frr_iface, ip_addr, netmask, mgmt_interface)
         
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
