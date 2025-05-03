@@ -174,16 +174,73 @@ def run_cmd(cmd, **kwargs):
     if DEBUG:
         printed = cmd if isinstance(cmd, str) else ' '.join(cmd)
         print(f'DEBUG: Running: {printed} | kwargs={kwargs}')
-    proc = subprocess.run(cmd, **kwargs)
-    if DEBUG and kwargs.get('capture_output'):
-        print('DEBUG: stdout:')
-        print(proc.stdout)
-        print('DEBUG: stderr:')
-        print(proc.stderr)
+    
+    # Use Popen instead of subprocess.run to avoid buffer deadlocks
+    if kwargs.get('capture_output'):
+        # Create pipes for stdout and stderr
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=kwargs.get('text', False),
+            shell=kwargs.get('shell', False)
+        )
+        
+        # Read stdout and stderr incrementally to avoid buffer deadlocks
+        stdout_data = []
+        stderr_data = []
+        
+        while True:
+            # Read from stdout and stderr without blocking
+            stdout_chunk = process.stdout.read(1024)
+            stderr_chunk = process.stderr.read(1024)
+            
+            # If we got data, store it
+            if stdout_chunk:
+                stdout_data.append(stdout_chunk)
+            if stderr_chunk:
+                stderr_data.append(stderr_chunk)
+            
+            # Check if process has finished
+            if process.poll() is not None:
+                # Read any remaining data
+                stdout_chunk = process.stdout.read()
+                stderr_chunk = process.stderr.read()
+                if stdout_chunk:
+                    stdout_data.append(stdout_chunk)
+                if stderr_chunk:
+                    stderr_data.append(stderr_chunk)
+                break
+            
+            # Small sleep to avoid CPU spinning
+            time.sleep(0.01)
+        
+        # Join the data
+        stdout_output = ''.join(stdout_data) if kwargs.get('text', False) else b''.join(stdout_data)
+        stderr_output = ''.join(stderr_data) if kwargs.get('text', False) else b''.join(stderr_data)
+        
+        # Create a CompletedProcess object to match subprocess.run's return value
+        proc = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=process.returncode,
+            stdout=stdout_output,
+            stderr=stderr_output
+        )
+        
+        if DEBUG:
+            print('DEBUG: stdout:')
+            print(proc.stdout)
+            print('DEBUG: stderr:')
+            print(proc.stderr)
+    else:
+        # If we're not capturing output, just use subprocess.run
+        proc = subprocess.run(cmd, **kwargs)
+    
     if kwargs.get('check') and proc.returncode != 0:
         if DEBUG:
             print(f'DEBUG: Command failed with return code {proc.returncode}')
         proc.check_returncode()
+    
     return proc
 
 # Prompt helper
