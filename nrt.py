@@ -453,8 +453,15 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Get the interface MAC address
-            iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
+            # Check if dummy_client interface exists
+            client_iface = "dummy_client"
+            iface_check = run_cmd(['ip', 'link', 'show', client_iface], capture_output=True, check=False)
+            if iface_check.returncode != 0:
+                print(f"Error: {client_iface} interface does not exist. Using {iface} instead.")
+                client_iface = iface
+            
+            # Get the MAC address for the interface we'll actually use
+            iface_mac_output = run_cmd(['ip', 'link', 'show', client_iface], capture_output=True, text=True).stdout
             iface_mac = None
             for line in iface_mac_output.splitlines():
                 if 'link/ether' in line:
@@ -462,7 +469,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                     break
             
             if not iface_mac:
-                print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
+                print(f"Warning: Could not determine MAC address for {client_iface}, using random MAC")
                 iface_mac = dhcp_utils.random_mac()
                 
             # Create a random client MAC address
@@ -471,20 +478,30 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             # Using dhcppython for DHCP testing
             
             print(f"DHCP Test Details:")
-            print(f"  Interface: {iface} (MAC: {iface_mac})")
+            print(f"  Interface: {client_iface} (MAC: {iface_mac})")
             print(f"  Source IP: {source_ip}")
             print(f"  Destination IP: {srv}")
             print(f"  Client MAC: {client_mac}")
             
             try:
-                # Create DHCP client using the dummy_client interface
-                print(f"Creating DHCP client on dummy_client interface...")
-                client_iface = "dummy_client"
-                c = dhcp_client.DHCPClient(
-                    client_iface,
-                    send_from_port=67,  # Server port (for relay)
-                    send_to_port=67     # Server port
-                )
+                
+                # Create DHCP client using the client interface
+                print(f"Creating DHCP client on {client_iface} interface...")
+                try:
+                    c = dhcp_client.DHCPClient(
+                        client_iface,
+                        send_from_port=67,  # Server port (for relay)
+                        send_to_port=67     # Server port
+                    )
+                except Exception as e:
+                    print(f"Error creating DHCP client on {client_iface}: {e}")
+                    print(f"Falling back to using {iface} interface...")
+                    client_iface = iface
+                    c = dhcp_client.DHCPClient(
+                        client_iface,
+                        send_from_port=67,  # Server port (for relay)
+                        send_to_port=67     # Server port
+                    )
                 
                 # Create a list of DHCP options
                 print(f"Setting up DHCP options...")
@@ -499,24 +516,32 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 print(f"Attempting to get DHCP lease from {srv}...")
                 # Set broadcast=False for unicast to specific server
                 # Set server to the DHCP server IP
-                lease = c.get_lease(
-                    client_mac,
-                    broadcast=False,
-                    options_list=options_list,
-                    server=srv,
-                    relay=helper_ip
-                )
+                try:
+                    lease = c.get_lease(
+                        client_mac,
+                        broadcast=False,
+                        options_list=options_list,
+                        server=srv,
+                        relay=helper_ip
+                    )
+                    
+                    # If we get here, we got a lease
+                    print(f"Successfully obtained DHCP lease!")
+                    if DEBUG:
+                        print(f"DEBUG: Lease details:")
+                        print(f"  Your IP: {lease.ack.yiaddr}")
+                        print(f"  Server IP: {lease.ack.siaddr}")
+                        print(f"  Gateway: {lease.ack.giaddr}")
+                        print(f"  Options: {lease.ack.options}")
+                    
+                    print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
+                except Exception as e:
+                    print(f"Error during DHCP lease request: {e}")
+                    if DEBUG:
+                        import traceback
+                        traceback.print_exc()
+                    print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
                 
-                # If we get here, we got a lease
-                print(f"Successfully obtained DHCP lease!")
-                if DEBUG:
-                    print(f"DEBUG: Lease details:")
-                    print(f"  Your IP: {lease.ack.yiaddr}")
-                    print(f"  Server IP: {lease.ack.siaddr}")
-                    print(f"  Gateway: {lease.ack.giaddr}")
-                    print(f"  Options: {lease.ack.options}")
-                
-                print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
                 
             except Exception as e:
                 print(f"Error during DHCP test: {e}")
