@@ -641,8 +641,9 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     
     # Show the routing table
     route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
-    print("Current routing table:")
-    print(route_output)
+    if DEBUG:
+        print("Current routing table:")
+        print(route_output)
     
     # Check connectivity to the upstream router
     print(f"Testing connectivity to upstream router {up}")
@@ -673,14 +674,16 @@ def show_ospf_status():
     time.sleep(5)
     
     # Show the routing table from FRR
-    print("\n=== FRR Routing Table ===")
     frr_routes = run_cmd(['vtysh', '-c', 'show ip route'], capture_output=True, text=True).stdout
-    print(frr_routes)
+    if DEBUG:
+        print("\n=== FRR Routing Table ===")
+        print(frr_routes)
     
     # Show the kernel routing table
-    print(f'\n=== Kernel Routing Table ===')
     route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
-    print(route_output)
+    if DEBUG:
+        print(f'\n=== Kernel Routing Table ===')
+        print(route_output)
     
     # Add a default route via the upstream router after OSPF has had time to establish
     print("Adding default route via upstream router")
@@ -763,7 +766,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Wait a bit more to ensure stability
     print(f"Preparing {mgmt1_ip} to send tests...")
-    run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=False, text=False)
+    run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=True)
     time.sleep(4)
 
     # Ping tests
@@ -969,7 +972,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET}')
     except Exception as e:
         https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
+        if DEBUG:
+            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
+        else:
+            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET}')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {ip_addr}', https_ok))
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
@@ -985,7 +991,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
     except Exception as e:
         https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+        if DEBUG:
+            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+        else:
+            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET}')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
