@@ -453,15 +453,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
             
-            # Check if dummy_client interface exists
-            client_iface = "dummy_client"
-            iface_check = run_cmd(['ip', 'link', 'show', client_iface], capture_output=True, check=False)
-            if iface_check.returncode != 0:
-                print(f"Error: {client_iface} interface does not exist. Using {iface} instead.")
-                client_iface = iface
-            
-            # Get the MAC address for the interface we'll actually use
-            iface_mac_output = run_cmd(['ip', 'link', 'show', client_iface], capture_output=True, text=True).stdout
+            # Get the MAC address for the main interface
+            iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
             iface_mac = None
             for line in iface_mac_output.splitlines():
                 if 'link/ether' in line:
@@ -469,7 +462,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                     break
             
             if not iface_mac:
-                print(f"Warning: Could not determine MAC address for {client_iface}, using random MAC")
+                print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
                 iface_mac = dhcp_utils.random_mac()
                 
             # Create a random client MAC address
@@ -478,30 +471,19 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             # Using dhcppython for DHCP testing
             
             print(f"DHCP Test Details:")
-            print(f"  Interface: {client_iface} (MAC: {iface_mac})")
+            print(f"  Interface: {iface} (MAC: {iface_mac})")
             print(f"  Source IP: {source_ip}")
             print(f"  Destination IP: {srv}")
             print(f"  Client MAC: {client_mac}")
             
             try:
-                
-                # Create DHCP client using the client interface
-                print(f"Creating DHCP client on {client_iface} interface...")
-                try:
-                    c = dhcp_client.DHCPClient(
-                        client_iface,
-                        send_from_port=67,  # Server port (for relay)
-                        send_to_port=67     # Server port
-                    )
-                except Exception as e:
-                    print(f"Error creating DHCP client on {client_iface}: {e}")
-                    print(f"Falling back to using {iface} interface...")
-                    client_iface = iface
-                    c = dhcp_client.DHCPClient(
-                        client_iface,
-                        send_from_port=67,  # Server port (for relay)
-                        send_to_port=67     # Server port
-                    )
+                # Create DHCP client using the main interface
+                print(f"Creating DHCP client on {iface} interface...")
+                c = dhcp_client.DHCPClient(
+                    iface,
+                    send_from_port=67,  # Server port (for relay)
+                    send_to_port=67     # Server port
+                )
                 
                 # Create a list of DHCP options
                 print(f"Setting up DHCP options...")
