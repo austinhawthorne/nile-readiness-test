@@ -762,8 +762,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
     
     # Send initial pings which always seem to fail (need to figure out why)
+    print("Sending an initial ping from loopback, it will fail.  Don't be alarmed, we try a second time...")
     for tgt in dns_servers:
-        run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=False)
+        run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
     time.sleep(2)
     
     # Ping tests
