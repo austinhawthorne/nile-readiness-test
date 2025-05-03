@@ -327,6 +327,12 @@ def get_user_input(config_file=None):
         print(f"  Run RADIUS Tests: {run_radius}")
         if run_radius:
             print(f"  RADIUS Servers: {', '.join(radius_servers)}")
+        print(f"  Run Custom DNS Tests: {run_custom_dns_tests}")
+        if run_custom_dns_tests:
+            print(f"  Custom DNS Servers: {', '.join(custom_dns_servers)}")
+        print(f"  Run Custom NTP Tests: {run_custom_ntp_tests}")
+        if run_custom_ntp_tests:
+            print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
     else:
         # Interactive mode
         print("\nNetwork Interface Configuration:")
