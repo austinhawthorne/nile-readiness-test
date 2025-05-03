@@ -481,7 +481,10 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
                 print('DEBUG: DHCP DISCOVER summary:')
                 print(pkt.summary())
                 print('DEBUG: DHCP DISCOVER details:')
-                print(pkt.show())
+                try:
+                    print(pkt.show())
+                except Exception as e:
+                    print(f"Error showing packet details: {e}")
             # Send the packet with verbose output to see what's happening
             print(f"Sending packet on interface {iface}...")
             sendp(pkt, iface=iface, verbose=True)
