@@ -761,13 +761,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     mgmt1_ip = str(ipaddress.IPv4Network(mgmt1).network_address+1)
     print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
     
-    # Send initial pings to update ARP cache
-    print("Sending initial pings to update ARP cache...")
+    # Send initial pings which always seem to fail (need to figure out why)
     for tgt in dns_servers:
-        run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
-    
-    # Wait a moment for ARP cache to update
-    print("Waiting for ARP cache to update...")
+        run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=False)
     time.sleep(2)
     
     # Ping tests
