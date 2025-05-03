@@ -382,9 +382,10 @@ def restore_state(iface, state):
     
     # Apply a temporary IP configuration if there are no addresses in the state
     # This helps with the "Nexthop has invalid gateway" error
+    # Use 0.0.0.0/0 without setting a default gateway to avoid adding additional routes
     if not state['addrs']:
         print("No original addresses found, applying temporary IP configuration...")
-        run_cmd(['ip','addr','add','10.200.1.2/30','dev',iface], check=False)
+        run_cmd(['ip','addr','add','0.0.0.0/0','dev',iface], check=False)
         run_cmd(['ip','link','set','dev',iface,'up'], check=False)
     
     # Add back the original addresses
