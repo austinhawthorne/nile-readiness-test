@@ -575,8 +575,25 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     ]
     run_cmd(cmds, check=True)
     
-    # Add route to upstream router
-    run_cmd(['ip', 'route', 'add', up, 'via', up, 'dev', iface], check=False)
+    # Verify interface is up and properly configured
+    print(f"Verifying interface {iface} is up and properly configured...")
+    iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+    if "state UP" not in iface_status:
+        print(f"Interface {iface} is not up. Attempting to bring it up...")
+        run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+        # Wait for interface to come up
+        time.sleep(2)
+        # Check again
+        iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+        if "state UP" not in iface_status:
+            print(f"WARNING: Interface {iface} could not be brought up. OSPF may not work correctly.")
+    
+    # Verify IP address is configured
+    iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', iface], capture_output=True, text=True).stdout
+    if f"inet {ip}" not in iface_addr:
+        print(f"IP address {ip} not found on interface {iface}. Reconfiguring...")
+        run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=False)
+        run_cmd(['ip', 'addr', 'add', f'{ip}/{prefix}', 'dev', iface], check=True)
     
     # Show the routing table
     route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
