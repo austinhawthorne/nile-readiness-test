@@ -393,6 +393,8 @@ def get_user_input(config_file=None):
 
 # Record/restore host state
 def record_state(iface):
+    if DEBUG:
+        print(f"Recording state of interface {iface}...")
     state = {}
     out = run_cmd(['ip','addr','show','dev',iface], capture_output=True, text=True).stdout
     state['addrs']  = [l.split()[1] for l in out.splitlines() if 'inet ' in l]
@@ -407,79 +409,94 @@ def restore_state(iface, state):
     print('\nRestoring original state...')
     
     # First, remove dummy interfaces
-    print("Removing dummy interfaces...")
+    if DEBUG:
+        print("Removing dummy interfaces...")
     for name in ('mgmt1','mgmt2','client'):
         run_cmd(['ip','link','delete',f'dummy_{name}'], check=False)
     
     # Flush the interface
-    print(f"Flushing interface {iface}...")
+    if DEBUG:
+        print(f"Flushing interface {iface}...")
     run_cmd(['ip','addr','flush','dev',iface], check=True)
     
     # Apply a temporary IP configuration if there are no addresses in the state
     # This helps with the "Nexthop has invalid gateway" error
     # Use 0.0.0.0/0 without setting a default gateway to avoid adding additional routes
     if not state['addrs']:
-        print("No original addresses found, applying temporary IP configuration...")
+        if DEBUG:
+            print("No original addresses found, applying temporary IP configuration...")
         run_cmd(['ip','addr','add','0.0.0.0/0','dev',iface], check=False)
         run_cmd(['ip','link','set','dev',iface,'up'], check=False)
     
     # Add back the original addresses
-    print("Restoring original IP addresses...")
+    if DEBUG:
+        print("Restoring original IP addresses...")
     for addr in state['addrs']:
         run_cmd(['ip','addr','add',addr,'dev',iface], check=False)
     
     # Make sure the interface is up
-    print(f"Ensuring interface {iface} is up...")
+    if DEBUG:
+        print(f"Ensuring interface {iface} is up...")
     run_cmd(['ip','link','set','dev',iface,'up'], check=False)
     
     # Flush default routes
-    print("Flushing default routes...")
+    if DEBUG:
+        print("Flushing default routes...")
     run_cmd(['ip','route','flush','default'], check=False)
     
     # Add back the original routes with error handling
-    print("Restoring original routes...")
+    if DEBUG:
+        print("Restoring original routes...")
     for r in state['routes']:
         parts = r.split()
         try:
             # Try to add the route
             run_cmd(['ip','route','add'] + parts, check=False)
         except Exception as e:
-            print(f"Warning: Could not restore route {' '.join(parts)}: {e}")
+            if DEBUG:
+                print(f"Warning: Could not restore route {' '.join(parts)}: {e}")
             # If the route has a gateway, try to add a direct route to the gateway first
             if 'via' in parts:
                 gateway_index = parts.index('via') + 1
                 if gateway_index < len(parts):
                     gateway = parts[gateway_index]
-                    print(f"Attempting to add direct route to gateway {gateway}...")
+                    if DEBUG:
+                        print(f"Attempting to add direct route to gateway {gateway}...")
                     try:
                         run_cmd(['ip','route','add',gateway,'dev',iface], check=False)
                         # Try adding the original route again
                         run_cmd(['ip','route','add'] + parts, check=False)
                     except Exception as e2:
-                        print(f"Warning: Could not add direct route to gateway {gateway}: {e2}")
+                        if DEBUG:
+                            print(f"Warning: Could not add direct route to gateway {gateway}: {e2}")
     
     # Restore FRR configuration
-    print("Restoring FRR configuration...")
+    if DEBUG:
+        print("Restoring FRR configuration...")
     with open('/etc/frr/daemons','w') as f: f.write(state['daemons'])
     run_cmd(['rm','-f','/etc/frr/frr.conf'], check=False)
     
     # Restore DNS configuration
-    print("Restoring DNS configuration...")
+    if DEBUG:
+        print("Restoring DNS configuration...")
     with open('/etc/resolv.conf','w') as f: f.write(state['resolv'])
     
     # Stop and disable FRR
-    print("Stopping and disabling FRR...")
+    if DEBUG:
+        print("Stopping and disabling FRR...")
     run_cmd(['systemctl','stop','frr'], check=False)
     run_cmd(['systemctl','disable','frr'], check=False)
     
-    print('Removed FRR config, stopped service, restored DNS.')
+    if DEBUG:
+        print('Removed FRR config, stopped service, restored DNS.')
 
 # Configure main interface
 def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
     print(f'Configuring {iface} → {ip_addr}/{netmask}')
     
     # Get a list of all network interfaces
-    print("Getting list of network interfaces...")
+    if DEBUG:
+        print("Getting list of network interfaces...")
     interfaces_output = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
     interfaces = []
     for line in interfaces_output.splitlines():
@@ -489,34 +506,42 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
             interfaces.append(interface_name)
     
     # Check for and clean up dummy interfaces from previous runs
-    print("Checking for dummy interfaces from previous runs...")
+    if DEBUG:
+        print("Checking for dummy interfaces from previous runs...")
     dummy_interfaces = ['dummy_mgmt1', 'dummy_mgmt2', 'dummy_client']
     for dummy in dummy_interfaces:
         if dummy in interfaces:
-            print(f"Removing leftover dummy interface {dummy}...")
+            if DEBUG:
+                print(f"Removing leftover dummy interface {dummy}...")
             run_cmd(['ip', 'link', 'delete', dummy], check=False)
     
     # Check if management interface has a default gateway and remove it
     if mgmt_interface in interfaces and mgmt_interface != iface:
-        print(f"Checking if management interface {mgmt_interface} has a default gateway...")
+        if DEBUG:
+            print(f"Checking if management interface {mgmt_interface} has a default gateway...")
         route_output = run_cmd(['ip', 'route', 'show', 'dev', mgmt_interface], capture_output=True, text=True).stdout
         if 'default' in route_output:
-            print(f"Removing default gateway from management interface {mgmt_interface}...")
+            if DEBUG:
+                print(f"Removing default gateway from management interface {mgmt_interface}...")
             run_cmd(['ip', 'route', 'del', 'default', 'dev', mgmt_interface], check=False)
-            print(f"Default gateway removed from {mgmt_interface}")
+            if DEBUG:
+                print(f"Default gateway removed from {mgmt_interface}")
     
     # Disable all interfaces except loopback and management interface
-    print(f"Disabling all interfaces except loopback and {mgmt_interface} (management interface)...")
+    if DEBUG:
+        print(f"Disabling all interfaces except loopback and {mgmt_interface} (management interface)...")
     interfaces_to_disable = [interface for interface in interfaces 
                             if interface != 'lo' and interface != mgmt_interface and not interface.startswith('dummy_')]
     
     # First attempt to disable all interfaces
     for interface in interfaces_to_disable:
-        print(f"Disabling interface {interface}...")
+        if DEBUG:
+            print(f"Disabling interface {interface}...")
         run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
     
     # Verify interfaces are actually down and retry if needed
-    print("Verifying interfaces are down...")
+    if DEBUG:
+        print("Verifying interfaces are down...")
     max_attempts = 3
     for attempt in range(max_attempts):
         all_down = True
@@ -524,33 +549,40 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
         for interface in interfaces_to_disable:
             # Check if interface is still up
             if f"{interface}: " in interfaces_output and "state UP" in interfaces_output.split(f"{interface}: ")[1].split("\n")[0]:
-                print(f"Interface {interface} is still up, retrying...")
+                if DEBUG:
+                    print(f"Interface {interface} is still up, retrying...")
                 run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
                 all_down = False
         
         if all_down:
-            print("All interfaces successfully disabled.")
+            if DEBUG:
+                print("All interfaces successfully disabled.")
             break
         
         if attempt < max_attempts - 1:
-            print(f"Some interfaces still up. Waiting before retry {attempt+1}/{max_attempts}...")
+            if DEBUG:
+                print(f"Some interfaces still up. Waiting before retry {attempt+1}/{max_attempts}...")
             time.sleep(2)
     
     # Configure the specified interface
-    print(f'Configuring {iface}...')
+    if DEBUG:
+        print(f'Configuring {iface}...')
     prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
     
     # Then flush and configure
-    print(f"Flushing and configuring {iface}...")
+    if DEBUG:
+        print(f"Flushing and configuring {iface}...")
     run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=True)
     run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
     
     # Finally enable the interface
-    print(f"Enabling {iface}...")
+    if DEBUG:
+        print(f"Enabling {iface}...")
     run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
     
     # Wait a moment for the interface to come up
-    print("Waiting for interface to come up...")
+    if DEBUG:
+        print("Waiting for interface to come up...")
     time.sleep(2)
 
 # Add loopbacks
@@ -563,7 +595,8 @@ def add_loopbacks(m1,m2,client):
         run_cmd(['ip','link','add',iface,'type','dummy'], check=False)
         run_cmd(['ip','addr','add',f'{addr}/{prefix}','dev',iface], check=False)
         run_cmd(['ip','link','set','dev',iface,'up'], check=True)
-        print(f'Loopback {iface} → {addr}/{prefix}')
+        if DEBUG:
+            print(f'Loopback {iface} → {addr}/{prefix}')
 
 # OSPF Hello sniff
 def sniff_ospf_hello(iface, timeout=60):
@@ -590,7 +623,8 @@ def sniff_ospf_hello(iface, timeout=60):
 def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
     
-    print(f"Configuring FRR and OSPF for interface {iface}")
+    if DEBUG:
+        print(f"Configuring FRR and OSPF for interface {iface}")
     
     # Enable ospfd in daemons file
     lines=open('/etc/frr/daemons').read().splitlines()
@@ -598,11 +632,13 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
         for l in lines: f.write('ospfd=yes\n' if l.startswith('ospfd=') else l+'\n')
     
     # Restart FRR
-    print("Restarting FRR...")
+    if DEBUG:
+        print("Restarting FRR...")
     run_cmd(['systemctl', 'restart', 'frr'], check=True)
     
     # Wait for FRR to start
-    print("Waiting for FRR to start...")
+    if DEBUG:
+        print("Waiting for FRR to start...")
     time.sleep(5)
     
     # Configure OSPF using vtysh commands
@@ -620,10 +656,13 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     run_cmd(cmds, check=True)
     
     # Verify interface is up and properly configured
-    print(f"Verifying interface {iface} is up and properly configured...")
+    if DEBUG:    
+        print(f"Verifying interface {iface} is up and properly configured...")
     iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+
     if "state UP" not in iface_status:
-        print(f"Interface {iface} is not up. Attempting to bring it up...")
+        if DEBUG:
+            print(f"Interface {iface} is not up. Attempting to bring it up...")
         run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
         # Wait for interface to come up
         time.sleep(2)
@@ -635,7 +674,8 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
     # Verify IP address is configured
     iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', iface], capture_output=True, text=True).stdout
     if f"inet {ip}" not in iface_addr:
-        print(f"IP address {ip} not found on interface {iface}. Reconfiguring...")
+        if DEBUG:
+            print(f"IP address {ip} not found on interface {iface}. Reconfiguring...")
         run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=False)
         run_cmd(['ip', 'addr', 'add', f'{ip}/{prefix}', 'dev', iface], check=True)
     
@@ -685,8 +725,11 @@ def show_ospf_status():
         print(f'\n=== Kernel Routing Table ===')
         print(route_output)
     
+
+    '''
     # Add a default route via the upstream router after OSPF has had time to establish
-    print("Adding default route via upstream router")
+    if DEBUG:
+        print("Adding default route via upstream router")
     gateway_ip = None
     for line in route_output.splitlines():
         if 'via' in line and not line.startswith('default'):
@@ -698,6 +741,7 @@ def show_ospf_status():
     if gateway_ip:
         run_cmd(['ip', 'route', 'add', 'default', 'via', gateway_ip], check=False)
         print(f"Added default route via {gateway_ip}")
+    '''
     
     return success
 
