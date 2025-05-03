@@ -31,6 +31,10 @@ from scapy.config import conf
 from scapy.all import sniff, sendp, RandMAC, Ether, BOOTP, DHCP
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
+# Import dhcppython for improved DHCP testing
+import dhcppython.client as dhcp_client
+import dhcppython.options as dhcp_options
+import dhcppython.utils as dhcp_utils
 
 # Parse command line arguments
 def parse_args():
@@ -431,7 +435,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
 
-    # DHCP relay with ping pre-check - using scapy like the original
+    # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
         # Use the first IP of the client subnet as the helper IP (giaddr)
@@ -442,14 +446,12 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         # This is what the server will see as the source of the packet
         source_ip = ip_addr
         print(f"Using interface IP {source_ip} as source IP for DHCP packets")
+        
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
             if p.returncode != 0:
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
-            
-            # Use scapy to craft and send DHCP packets
-            xid = random.randint(1, 0xffffffff)
             
             # Get the interface MAC address
             iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
@@ -461,10 +463,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             
             if not iface_mac:
                 print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
-                iface_mac = str(RandMAC())
+                iface_mac = dhcp_utils.random_mac()
                 
             # Create a random client MAC address
-            client_mac = str(RandMAC())
+            client_mac = dhcp_utils.random_mac()
             
             # Try using dhcping if available
             dhcping_available = shutil.which('dhcping') is not None
@@ -475,60 +477,68 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 if dhcping_result.returncode == 0:
                     print(f"dhcping to {srv} successful!")
                     print(dhcping_result.stdout)
-                    # If dhcping worked, we can skip the scapy packet crafting
+                    # If dhcping worked, we can skip the dhcppython client
                     print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
                     continue
                 else:
-                    print(f"dhcping to {srv} failed, falling back to scapy...")
+                    print(f"dhcping to {srv} failed, falling back to dhcppython...")
                     if DEBUG:
                         print(f"dhcping stderr: {dhcping_result.stderr}")
             
             print(f"DHCP Test Details:")
             print(f"  Interface: {iface} (MAC: {iface_mac})")
-            print(f"  Source IP: {helper_ip}")
+            print(f"  Source IP: {source_ip}")
             print(f"  Destination IP: {srv}")
             print(f"  Client MAC: {client_mac}")
-            print(f"  Transaction ID: {hex(xid)}")
             
-            # Create the packet with broadcast flag set
-            pkt = (Ether(src=iface_mac, dst='ff:ff:ff:ff:ff:ff')/
-                  IP(src=source_ip, dst=srv)/
-                  UDP(sport=67, dport=67)/
-                  BOOTP(op=1, chaddr=client_mac, xid=xid, giaddr=helper_ip, flags=0x8000)/
-                  DHCP(options=[('message-type','discover'), ('end')]))
-            
-            print(f"Sending DHCP DISCOVER packet...")
-            
-            if DEBUG:
-                print('DEBUG: DHCP DISCOVER summary:')
-                print(pkt.summary())
-                print('DEBUG: DHCP DISCOVER details:')
-                try:
-                    print(pkt.show())
-                except Exception as e:
-                    print(f"Error showing packet details: {e}")
-            # Send the packet with verbose output to see what's happening
-            print(f"Sending packet on interface {iface}...")
-            sendp(pkt, iface=iface, verbose=True)
-            
-            # Sniff with more detailed output
-            print(f"Sniffing for responses on {iface} (timeout: 20s)...")
-            resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
-                        timeout=60, count=1,
-                        lfilter=lambda p: p.haslayer(BOOTP)
-                                      and p[BOOTP].xid==xid
-                                      and p[BOOTP].op==2)
-            
-            # Print all captured packets regardless of filter
-            print(f"Sniffing for ALL UDP packets on {iface} to see what's coming back...")
-            all_resp = sniff(iface=iface, filter='udp', timeout=5, count=10)
-            print(f"Captured {len(all_resp)} UDP packets:")
-            for i, p in enumerate(all_resp):
-                print(f"  Packet {i+1}: {p.summary()}")
-            if DEBUG:
-                print(f'DEBUG: DHCP response count: {len(resp)}')
-                for p in resp: print(p.summary())
-            print(f'DHCP relay to {srv}: ' + (GREEN+'Success'+RESET if resp else RED+'Fail'+RESET))
+            try:
+                # Create DHCP client
+                print(f"Creating DHCP client...")
+                c = dhcp_client.DHCPClient(
+                    iface,
+                    send_from_port=67,  # Server port (for relay)
+                    send_to_port=67,    # Server port
+                    relay=helper_ip     # Set the relay agent IP (giaddr)
+                )
+                
+                # Create a list of DHCP options
+                print(f"Setting up DHCP options...")
+                options_list = dhcp_options.OptionList([
+                    # Add standard options
+                    dhcp_options.options.short_value_to_object(60, "nile-readiness-test"),  # Class identifier
+                    dhcp_options.options.short_value_to_object(12, socket.gethostname()),   # Hostname
+                    # Parameter request list - request common options
+                    dhcp_options.options.short_value_to_object(55, [1, 3, 6, 15, 26, 28, 51, 58, 59, 43])
+                ])
+                
+                print(f"Attempting to get DHCP lease from {srv}...")
+                # Set broadcast=False for unicast to specific server
+                # Set server to the DHCP server IP
+                lease = c.get_lease(
+                    client_mac,
+                    broadcast=False,
+                    options_list=options_list,
+                    server=srv,
+                    relay=helper_ip
+                )
+                
+                # If we get here, we got a lease
+                print(f"Successfully obtained DHCP lease!")
+                if DEBUG:
+                    print(f"DEBUG: Lease details:")
+                    print(f"  Your IP: {lease.yiaddr}")
+                    print(f"  Server IP: {lease.siaddr}")
+                    print(f"  Gateway: {lease.giaddr}")
+                    print(f"  Options: {lease.options}")
+                
+                print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
+                
+            except Exception as e:
+                print(f"Error during DHCP test: {e}")
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
+                print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
     else:
         print('Skipping DHCP tests')
 
