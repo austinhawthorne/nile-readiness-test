@@ -910,60 +910,44 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     else:
         print('Skipping RADIUS tests')
 
-    # NTP tests from mgmt1
-    print(f'\n=== NTP tests from mgmt1 ===')
-    # Test default NTP servers
-    for ntp in ('time.google.com', 'pool.ntp.org'):
-        r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
-        result = r.returncode == 0
-        print(f'NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'NTP {ntp} from mgmt1', result))
-    
-    # Test custom NTP servers if provided
-    if custom_ntp_servers:
-        print(f'\n=== Custom NTP tests from mgmt1 ===')
-        for ntp in custom_ntp_servers:
-            r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
-            result = r.returncode == 0
-            print(f'Custom NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-            test_results.append((f'Custom NTP {ntp} from mgmt1', result))
-    
     # NTP tests from main interface
-    print(f'\n=== NTP tests from main interface {iface} ===')
+    print(f'\n=== NTP tests from main interface ({ip_addr}) ===')
     # Test default NTP servers
     for ntp in ('time.google.com', 'pool.ntp.org'):
         r = run_cmd(['ntpdate', '-q', '-b', ip_addr, ntp], capture_output=True, text=True)
         result = r.returncode == 0
         print(f'NTP {ntp} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'NTP {ntp} from {iface}', result))
+        test_results.append((f'NTP {ntp} from {ip_addr}', result))
     
     # Test custom NTP servers if provided
     if custom_ntp_servers:
-        print(f'\n=== Custom NTP tests from main interface {iface} ===')
+        print(f'\n=== Custom NTP tests from main interface ({ip_addr}) ===')
         for ntp in custom_ntp_servers:
             r = run_cmd(['ntpdate', '-q', '-b', ip_addr, ntp], capture_output=True, text=True)
             result = r.returncode == 0
             print(f'Custom NTP {ntp} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-            test_results.append((f'Custom NTP {ntp} from {iface}', result))
+            test_results.append((f'Custom NTP {ntp} from {ip_addr}', result))
+    
+    # NTP tests from mgmt1
+    print(f'\n=== NTP tests from mgmt1 ({mgmt1_ip}) ===')
+    # Test default NTP servers
+    for ntp in ('time.google.com', 'pool.ntp.org'):
+        r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
+        result = r.returncode == 0
+        print(f'NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'NTP {ntp} from {mgmt1_ip}', result))
+    
+    # Test custom NTP servers if provided
+    if custom_ntp_servers:
+        print(f'\n=== Custom NTP tests from mgmt1 ({mgmt1_ip}) ===')
+        for ntp in custom_ntp_servers:
+            r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
+            result = r.returncode == 0
+            print(f'Custom NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Custom NTP {ntp} from {mgmt1_ip}', result))
 
     # HTTPS and SSL Certificate tests
     print(f'=== HTTPS and SSL Certificate tests ===')
-    
-    # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
-    print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
-    parsed = urlparse(f'https://{NILE_HOSTNAME}')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS {NILE_HOSTNAME} from mgmt1', https_ok))
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from main interface
     print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
@@ -979,7 +963,23 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     except Exception as e:
         https_ok = False
         print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS {NILE_HOSTNAME} from {iface}', https_ok))
+    test_results.append((f'HTTPS {NILE_HOSTNAME} from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
+    print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {NILE_HOSTNAME}...')
@@ -1001,22 +1001,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f"Could not resolve {NILE_HOSTNAME} for SSL check")
         test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", False))
     
-    # Test HTTPS connectivity and SSL certificates for Amazon S3 from mgmt1
-    print(f'\nTesting HTTPS for {S3_HOSTNAME} from {mgmt1_ip}...')
-    parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS {S3_HOSTNAME} from mgmt1', https_ok))
-    
     # Test HTTPS connectivity and SSL certificates for Amazon S3 from main interface
     print(f'\nTesting HTTPS for {S3_HOSTNAME} from {ip_addr}...')
     parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
@@ -1031,7 +1015,23 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     except Exception as e:
         https_ok = False
         print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS {S3_HOSTNAME} from {iface}', https_ok))
+    test_results.append((f'HTTPS {S3_HOSTNAME} from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity and SSL certificates for Amazon S3 from mgmt1
+    print(f'\nTesting HTTPS for {S3_HOSTNAME} from {mgmt1_ip}...')
+    parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {S3_HOSTNAME}...')
@@ -1054,22 +1054,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f"Could not resolve {S3_HOSTNAME} for SSL check")
         test_results.append((f"SSL Certificate for {S3_HOSTNAME}", False))
     
-    # Test HTTPS connectivity for Nile Secure from mgmt1
-    print(f'\nTesting HTTPS for u1.nilesecure.com from {mgmt1_ip}...')
-    parsed = urlparse('https://u1.nilesecure.com')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS u1.nilesecure.com from mgmt1', https_ok))
-    
     # Test HTTPS connectivity for Nile Secure from main interface
     print(f'\nTesting HTTPS for u1.nilesecure.com from {ip_addr}...')
     parsed = urlparse('https://u1.nilesecure.com')
@@ -1084,7 +1068,23 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     except Exception as e:
         https_ok = False
         print(f'HTTPS u1.nilesecure.com from {ip_addr}: {RED}Fail{RESET} ({e})')
-    test_results.append((f'HTTPS u1.nilesecure.com from {iface}', https_ok))
+    test_results.append((f'HTTPS u1.nilesecure.com from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity for Nile Secure from mgmt1
+    print(f'\nTesting HTTPS for u1.nilesecure.com from {mgmt1_ip}...')
+    parsed = urlparse('https://u1.nilesecure.com')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS u1.nilesecure.com from {mgmt1_ip}', https_ok))
     
     # UDP Connectivity Check for Guest Access
     print(f'\n=== UDP Connectivity Check for Guest Access ===')
