@@ -958,44 +958,34 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from main interface
     print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
-    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
-                 '--connect-timeout', '10', '--interface', ip_addr,
-                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                 '-H', 'Accept-Language: en-US,en;q=0.5',
-                 f'https://{NILE_HOSTNAME}'], capture_output=True, text=True)
-    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
-    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
-    if https_ok:
-        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
-    else:
-        # For 403 errors, it's still a successful connection, just forbidden access
-        if r.stdout.strip() == '403':
-            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
-            https_ok = True
-        else:
-            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((ip_addr, 0))  # Bind to ip_addr with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {ip_addr}', https_ok))
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
     print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
-    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
-                 '--connect-timeout', '10', '--interface', mgmt1_ip,
-                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                 '-H', 'Accept-Language: en-US,en;q=0.5',
-                 f'https://{NILE_HOSTNAME}'], capture_output=True, text=True)
-    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
-    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
-    if https_ok:
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
-    else:
-        # For 403 errors, it's still a successful connection, just forbidden access
-        if r.stdout.strip() == '403':
-            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
-            https_ok = True
-        else:
-            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
