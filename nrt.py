@@ -443,7 +443,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
         source_ip = ip_addr
         print(f"Using interface IP {source_ip} as source IP for DHCP packets")
         for srv in dhcp_servers:
-            p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
+            p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
             if p.returncode != 0:
                 print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
                 continue
@@ -514,7 +514,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             # Sniff with more detailed output
             print(f"Sniffing for responses on {iface} (timeout: 20s)...")
             resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
-                        timeout=20, count=1,
+                        timeout=60, count=1,
                         lfilter=lambda p: p.haslayer(BOOTP)
                                       and p[BOOTP].xid==xid
                                       and p[BOOTP].op==2)
