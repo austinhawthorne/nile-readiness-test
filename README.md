@@ -1,9 +1,29 @@
 # Nile Readiness Test with Network Namespace Isolation
 
-This repository contains scripts for running Nile Readiness Tests while isolating network interfaces using Linux network namespaces. This approach allows you to:
+Script to test that a network is ready to support a Nile installation. The script mimics what a Nile gateway will perform to bring up a Nile service, as well as tests some basic network services.
 
-1. Run VNC server on one interface (e.g., end0) in a separate network namespace
-2. Run FRR tests on another interface (e.g., enxf0a731f41761) in the default namespace
+Running this script will test:
+
+- OSPF
+    - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency and advertise routes for defined subnets (NSB, Sensor, Client).
+    - Will fall back to static if this fails.
+- DNS Reachability
+    - Will try the default DNS servers for Nile.
+    - If that fails, will prompt for a user specified DNS server to use.
+- NTP Reachability
+    - Will run a test to sync with default Nile defined NTP servers
+- DHCP Server Reachability
+    - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
+- RADIUS Reachability
+    - Will run a sythentic test against a user defined RADIUS server.
+- Required Cloud Reachability for Nile Service
+    - Will run a TCP SYN test via NMAP
+
+
+This approach allows you to:
+
+1. Run VNC server on one interface (e.g., end0) in a separate network namespace, the network will still show up when frr is run, so make sure to use unique address space and do not set a default gateway.  This is intended to be a directly connected interface to a laptop for testing Nile network readiness.
+2. Run FRR tests on another interface (e.g., enxf0a731f41761) in the default namespace, this is a USB ethernet interface
 
 ## Scripts
 
@@ -25,6 +45,7 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
   - dig (DNS lookup utility)
   - ntpdate (NTP utility)
   - curl (HTTPS test utility)
+- Enable Predictable names to make life easier long term since using USB ethernet interfaces
 
 ## Installation
 
@@ -37,8 +58,12 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 2. Install required packages:
    ```
    sudo apt update
-   sudo apt install frr freeradius-client dnsutils ntpdate curl python3-scapy python3-ipaddress
-   pip3 install dhcppython
+   sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy
+   ```
+
+   For a Raspberry Pi, I had to add --break-system-packages as shown below to complete the install of dhcppython
+   ```
+   pip3 install dhcppython --break-system-packages
    ```
 
    For TigerVNC:
@@ -83,6 +108,11 @@ This repository contains scripts for running Nile Readiness Tests while isolatin
 
 ## Usage
 
+**Important Note on Order of Operations:**
+1. First, start the VNC server in a separate namespace using macvlan_vnc.sh
+2. Then, in a separate terminal, run the nrt.py script for FRR tests
+3. Keep the macvlan_vnc.sh script running while performing the nrt.py tests
+
 ### Step 1: Start VNC Server in a Separate Namespace
 
 Run the macvlan VNC script:
@@ -109,7 +139,7 @@ You can connect to the VNC server using any VNC client at the IP address and por
 
 ### Step 2: Run FRR Tests in the Default Namespace
 
-In a separate terminal, run the FRR tests:
+While keeping the macvlan_vnc.sh script running in its terminal, open a separate terminal and run the FRR tests:
 
 ```
 sudo ./nrt.py --config nrt_config.json
@@ -120,69 +150,33 @@ Or run interactively:
 sudo ./nrt.py
 ```
 
-The script will:
-1. Configure the FRR interface (default: enxf0a731f41761) in the default namespace
-2. Add loopback interfaces
-3. Sniff for OSPF Hello packets
-4. Configure OSPF using vtysh commands directly
-5. Actively wait for OSPF state Full/DR with a 30-second timeout
-6. Add the default route after OSPF has established
-7. Run connectivity tests (ping, DNS, DHCP relay using dhcppython, RADIUS, NTP, HTTPS)
-8. Restore the original state when done
-
-## Troubleshooting
-
-### VNC Server Issues
-
-#### Macvlan Issues
-
-- If you see "Operation not permitted" when creating the macvlan interface, make sure you're running the script as root
-- If you see "RTNETLINK answers: File exists" when creating the macvlan interface, it might already exist. Try removing it with: `sudo ip link del macvlan0`
-- If you can't connect to the VNC server:
-  - Try connecting to localhost:5900 (the script sets up port forwarding)
-  - Try connecting to the namespace IP directly: `vncviewer $VNC_IP:0`
-  - Check if the VNC server is listening with: `sudo ip netns exec vnc_ns netstat -tuln | grep 5900`
-  - Check if port forwarding is working: `sudo iptables -t nat -L PREROUTING`
-  - Make sure your firewall allows connections to port 5900: `sudo ufw status`
-  - Try a different VNC client (e.g., TigerVNC Viewer, RealVNC Viewer, Remmina)
-- If the namespace can't reach the internet, check:
-  - If the default gateway is correct: `sudo ip netns exec vnc_ns ip route`
-  - If DNS is working: `sudo ip netns exec vnc_ns ping 8.8.8.8`
-  - If the physical interface has internet connectivity
-
-#### TigerVNC Issues
-
-- If TigerVNC server fails to start in the namespace, check if it's already running in the default namespace
-- Verify that the VNC interface has the correct IP address and can reach the gateway
-- If you see "Xvnc: command not found", install TigerVNC with: `sudo apt install tigervnc-standalone-server`
-- If you see "xterm: command not found", install xterm with: `sudo apt install xterm`
-- The script tries multiple approaches to start TigerVNC:
-  - Basic start with minimal options
-  - With explicit interface binding
-  - Using the vncserver script if available
-- If you have issues connecting to the VNC server:
-  - Try connecting to localhost:5900 (the script sets up port forwarding)
-  - Try connecting to the namespace IP directly: `vncviewer $VNC_IP:0`
-  - Check if the VNC server is listening with: `sudo ip netns exec vnc_ns netstat -tuln | grep 5900`
-  - Check if port forwarding is working: `sudo iptables -t nat -L PREROUTING`
-  - Make sure your firewall allows connections to port 5900: `sudo ufw status`
-  - Try a different VNC client (e.g., TigerVNC Viewer, RealVNC Viewer, Remmina)
-
-### FRR Test Issues
-
-- If OSPF adjacency fails, check if the upstream router is sending OSPF Hello packets
-- Verify that the FRR interface has the correct IP address and can reach the upstream router
-- Check FRR logs: `sudo tail -f /var/log/frr/zebra.log /var/log/frr/ospfd.log`
-
-### DHCP Test Issues
-
-- The DHCP testing now uses the dhcppython library for more reliable DHCP relay testing
-- If DHCP tests fail, check if the DHCP server is reachable with ping
-- Verify that the helper IP (giaddr) is correctly set to the first IP of the client subnet
-- For debugging, run with the `--debug` flag to see detailed DHCP packet information
-
 ## Notes
 
 - The scripts must be run as root (sudo)
 - When you stop the VNC namespace script (Ctrl+C), it will automatically move the interface back to the default namespace and clean up
 - The FRR test script will restore the original state of the interface when it completes or if an error occurs
+- The nrt.py script now provides a comprehensive test summary at the end of execution, after restoring the system state
+- The DHCP testing has been improved to use the dhcppython library instead of scapy for more reliable DHCP relay testing
+- Only tested on Raspberry Pi, should run on any debian based distribution. 
+- VNC is only used to make it easier to use a portable device like a Raspberry Pi, without carrying around monitor/keyboard.
+
+
+## Dependencies Details
+
+### Python Dependencies
+
+- **scapy**: Used for OSPF packet sniffing
+- **dhcppython**: Used for DHCP relay testing (must be installed via pip3)
+
+### System Dependencies
+
+- **FRR**: Free Range Routing suite for OSPF testing
+- **TigerVNC**: For running the VNC server in a separate namespace
+- **radclient**: For RADIUS authentication testing
+- **dig**: For DNS lookup testing
+- **ntpdate**: For NTP time synchronization testing
+- **curl**: For HTTPS connectivity testing
+- **xterm**: Used by the VNC server
+
+Make sure all dependencies are installed before running the scripts. The installation commands in the Installation section will install all required dependencies.
+
