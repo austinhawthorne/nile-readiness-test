@@ -957,34 +957,26 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from main interface
     print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
-    parsed = urlparse(f'https://{NILE_HOSTNAME}')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((ip_addr, 0))  # Bind to ip_addr with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', ip_addr, 
+                 f'https://{NILE_HOSTNAME}'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {ip_addr}', https_ok))
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
     print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
-    parsed = urlparse(f'https://{NILE_HOSTNAME}')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', mgmt1_ip, 
+                 f'https://{NILE_HOSTNAME}'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
@@ -1009,34 +1001,26 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Test HTTPS connectivity and SSL certificates for Amazon S3 from main interface
     print(f'\nTesting HTTPS for {S3_HOSTNAME} from {ip_addr}...')
-    parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((ip_addr, 0))  # Bind to ip_addr with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', ip_addr, 
+                 f'https://{S3_HOSTNAME}/nile-prod-us-west-2'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS {S3_HOSTNAME} from {ip_addr}', https_ok))
     
     # Test HTTPS connectivity and SSL certificates for Amazon S3 from mgmt1
     print(f'\nTesting HTTPS for {S3_HOSTNAME} from {mgmt1_ip}...')
-    parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', mgmt1_ip, 
+                 f'https://{S3_HOSTNAME}/nile-prod-us-west-2'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
@@ -1062,34 +1046,26 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Test HTTPS connectivity for Nile Secure from main interface
     print(f'\nTesting HTTPS for u1.nilesecure.com from {ip_addr}...')
-    parsed = urlparse('https://u1.nilesecure.com')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((ip_addr, 0))  # Bind to ip_addr with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS u1.nilesecure.com from {ip_addr}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS u1.nilesecure.com from {ip_addr}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', ip_addr, 
+                 'https://u1.nilesecure.com'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS u1.nilesecure.com from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS u1.nilesecure.com from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS u1.nilesecure.com from {ip_addr}', https_ok))
     
     # Test HTTPS connectivity for Nile Secure from mgmt1
     print(f'\nTesting HTTPS for u1.nilesecure.com from {mgmt1_ip}...')
-    parsed = urlparse('https://u1.nilesecure.com')
-    host, port = parsed.hostname, parsed.port or 443
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
-        sock.connect((host, port))
-        sock.close()
-        https_ok = True
-        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET}')
-    except Exception as e:
-        https_ok = False
-        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', mgmt1_ip, 
+                 'https://u1.nilesecure.com'], capture_output=True, text=True)
+    https_ok = r.returncode == 0 and r.stdout.strip().startswith('2')  # 2xx status code
+    if https_ok:
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
     test_results.append((f'HTTPS u1.nilesecure.com from {mgmt1_ip}', https_ok))
     
     # UDP Connectivity Check for Guest Access

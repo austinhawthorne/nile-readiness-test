@@ -1,4 +1,4 @@
-# Nile Readiness Test with Network Namespace Isolation
+# Nile Readiness Test
 
 Script to test that a network is ready to support a Nile installation. The script mimics what a Nile gateway will perform to bring up a Nile service, as well as tests some basic network services.
 
@@ -28,22 +28,14 @@ Running this script will test:
     - Will use any custom DNS servers provided during initial DNS tests
     - Optional additional custom DNS resolution check
 
-
-This approach allows you to:
-
-1. Run VNC server on one interface (e.g., end0) in a separate network namespace, the network will still show up when frr is run, so make sure to use unique address space and do not set a default gateway.  This is intended to be a directly connected interface to a laptop for testing Nile network readiness.
-2. Run FRR tests on another interface (e.g., enxf0a731f41761) in the default namespace, this is a USB ethernet interface
-
 ## Scripts
 
-- **macvlan_vnc.sh**: Script that uses macvlan to link the physical interface to the namespace for VNC
-- **nrt.py**: Runs FRR tests in the default namespace without moving interfaces to namespaces
+- **nrt.py**: Runs FRR tests in the default namespace
 
 ## Prerequisites
 
 - Linux system with network namespace support
 - FRR (Free Range Routing) installed
-- TigerVNC server
 - Python 3.6+ with required packages:
   - scapy
   - ipaddress
@@ -78,80 +70,37 @@ This approach allows you to:
    pip3 install dhcppython --break-system-packages
    ```
 
-   For TigerVNC:
+3. Make the script executable:
    ```
-   sudo apt install tigervnc-standalone-server xterm
-   ```
-
-3. Make the scripts executable:
-   ```
-   chmod +x macvlan_vnc.sh nrt.py
+   chmod +x nrt.py
    ```
 
 ## Configuration
 
-1. Edit the configuration in the VNC script:
-
-   For `macvlan_vnc.sh`:
-   - `VNC_NS`: Namespace name for VNC (default: "vnc_ns")
-   - `PHYSICAL_IFACE`: Physical interface to link to (default: "end0")
-   - `MACVLAN_IFACE`: Name of the macvlan interface in the namespace (default: "macvlan0")
-   - `VNC_IP`: IP address for VNC interface (default: "10.2.0.199")
-   - `VNC_NETMASK`: Netmask in CIDR notation (default: "24")
-   - `VNC_GATEWAY`: Default gateway for VNC namespace (default: "10.2.0.1")
-   - `VNC_PORT`: VNC port (default: "5900", which is display :0)
-   - `VNC_GEOMETRY`: Screen resolution (default: "1024x768")
-
-2. Create a JSON configuration file for `nrt.py`:
-   ```json
-   {
-     "frr_interface": "enxf0a731f41761",
-     "ip_address": "192.168.2.100",
-     "netmask": "255.255.255.0",
-     "gateway": "192.168.2.1",
-     "nsb_subnet": "10.1.1.0/24",
-     "sensor_subnet": "10.1.2.0/24",
-     "client_subnet": "10.1.3.0/24",
-     "run_dhcp_tests": true,
-     "dhcp_servers": ["192.168.2.10"],
-     "run_radius_tests": false
-   }
-   ```
+Create a JSON configuration file for `nrt.py`:
+```json
+{
+  "frr_interface": "enxf0a731f41761",
+  "ip_address": "192.168.2.100",
+  "netmask": "255.255.255.0",
+  "gateway": "192.168.2.1",
+  "mgmt_interface": "end0",
+  "nsb_subnet": "10.1.1.0/24",
+  "sensor_subnet": "10.1.2.0/24",
+  "client_subnet": "10.1.3.0/24",
+  "run_dhcp_tests": true,
+  "dhcp_servers": ["192.168.2.10"],
+  "run_radius_tests": false,
+  "run_custom_dns_tests": true,
+  "custom_dns_servers": ["192.168.1.53", "10.0.0.53"],
+  "run_custom_ntp_tests": true,
+  "custom_ntp_servers": ["ntp.internal.example.com", "10.0.0.123"]
+}
+```
 
 ## Usage
 
-**Important Note on Order of Operations:**
-1. First, start the VNC server in a separate namespace using macvlan_vnc.sh
-2. Then, in a separate terminal, run the nrt.py script for FRR tests
-3. Keep the macvlan_vnc.sh script running while performing the nrt.py tests
-
-### Step 1: Start VNC Server in a Separate Namespace
-
-Run the macvlan VNC script:
-```
-sudo ./macvlan_vnc.sh
-```
-
-This will:
-1. Create a network namespace called "vnc_ns"
-2. Create a macvlan interface linked to the physical interface
-3. Move the macvlan interface to the namespace
-4. Configure the interface with the specified IP address
-5. Start TigerVNC server in the namespace
-6. Set up port forwarding to make the VNC server accessible
-7. Keep running to maintain the namespace (press Ctrl+C to stop and clean up)
-
-The macvlan approach has several advantages:
-- Doesn't remove the physical interface from the default namespace
-- Creates a virtual interface in the namespace that's linked to the physical interface
-- Allows for better connectivity between the namespace and the host
-- More flexible and less disruptive
-
-You can connect to the VNC server using any VNC client at the IP address and port displayed when the script runs.
-
-### Step 2: Run FRR Tests in the Default Namespace
-
-While keeping the macvlan_vnc.sh script running in its terminal, open a separate terminal and run the FRR tests:
+Run the FRR tests:
 
 ```
 sudo ./nrt.py --config nrt_config.json
@@ -164,14 +113,11 @@ sudo ./nrt.py
 
 ## Notes
 
-- The scripts must be run as root (sudo)
-- When you stop the VNC namespace script (Ctrl+C), it will automatically move the interface back to the default namespace and clean up
+- The script must be run as root (sudo)
 - The FRR test script will restore the original state of the interface when it completes or if an error occurs
 - The nrt.py script now provides a comprehensive test summary at the end of execution, after restoring the system state
 - The DHCP testing has been improved to use the dhcppython library instead of scapy for more reliable DHCP relay testing
-- Only tested on Raspberry Pi, should run on any debian based distribution. 
-- VNC is only used to make it easier to use a portable device like a Raspberry Pi, without carrying around monitor/keyboard.
-
+- Only tested on Raspberry Pi, should run on any debian based distribution.
 
 ## Dependencies Details
 
@@ -186,19 +132,17 @@ sudo ./nrt.py
 ### System Dependencies
 
 - **FRR**: Free Range Routing suite for OSPF testing
-- **TigerVNC**: For running the VNC server in a separate namespace
 - **radclient**: For RADIUS authentication testing
 - **dig**: For DNS lookup testing
 - **ntpdate**: For NTP time synchronization testing
 - **curl**: For HTTPS connectivity testing
-- **xterm**: Used by the VNC server
 - **netcat (nc)**: Used for UDP connectivity testing
 - **openssl**: Used for SSL certificate verification
 - **nslookup**: Used for DNS resolution testing
 
 Make sure all dependencies are installed before running the scripts. The installation commands in the Installation section will install all required dependencies.
 
-License
+## License
 
 MIT License
 
