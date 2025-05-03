@@ -434,7 +434,9 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
     # DHCP relay with ping pre-check - using scapy like the original
     if run_dhcp:
         print(f'=== DHCP tests (L3 relay) ===')
+        # Use the first IP of the client subnet as the helper IP
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
+        print(f"Using client subnet first IP {helper_ip} as DHCP relay agent (giaddr)")
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
@@ -443,20 +445,61 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
             
             # Use scapy to craft and send DHCP packets
             xid = random.randint(1, 0xffffffff)
-            pkt = (Ether(dst='ff:ff:ff:ff:ff:ff')/
+            
+            # Get the interface MAC address
+            iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
+            iface_mac = None
+            for line in iface_mac_output.splitlines():
+                if 'link/ether' in line:
+                    iface_mac = line.split()[1]
+                    break
+            
+            if not iface_mac:
+                print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
+                iface_mac = str(RandMAC())
+            
+            # Create a more detailed DHCP packet
+            client_mac = RandMAC()
+            
+            print(f"DHCP Test Details:")
+            print(f"  Interface: {iface} (MAC: {iface_mac})")
+            print(f"  Source IP: {helper_ip}")
+            print(f"  Destination IP: {srv}")
+            print(f"  Client MAC: {client_mac}")
+            print(f"  Transaction ID: {hex(xid)}")
+            
+            # Create the packet with broadcast flag set
+            pkt = (Ether(src=iface_mac, dst='ff:ff:ff:ff:ff:ff')/
                   IP(src=helper_ip, dst=srv)/
                   UDP(sport=67, dport=67)/
-                  BOOTP(op=1, chaddr=RandMAC(), xid=xid, giaddr=helper_ip)/
+                  BOOTP(op=1, chaddr=client_mac, xid=xid, giaddr=helper_ip, flags=0x8000)/
                   DHCP(options=[('message-type','discover'), ('end')]))
+            
+            print(f"Sending DHCP DISCOVER packet...")
+            
             if DEBUG:
                 print('DEBUG: DHCP DISCOVER summary:')
                 print(pkt.summary())
-            sendp(pkt, iface=iface, verbose=False)
+                print('DEBUG: DHCP DISCOVER details:')
+                print(pkt.show())
+            # Send the packet with verbose output to see what's happening
+            print(f"Sending packet on interface {iface}...")
+            sendp(pkt, iface=iface, verbose=True)
+            
+            # Sniff with more detailed output
+            print(f"Sniffing for responses on {iface} (timeout: 20s)...")
             resp = sniff(iface=iface, filter='udp and (port 67 or port 68)',
                         timeout=20, count=1,
                         lfilter=lambda p: p.haslayer(BOOTP)
                                       and p[BOOTP].xid==xid
                                       and p[BOOTP].op==2)
+            
+            # Print all captured packets regardless of filter
+            print(f"Sniffing for ALL UDP packets on {iface} to see what's coming back...")
+            all_resp = sniff(iface=iface, filter='udp', timeout=5, count=10)
+            print(f"Captured {len(all_resp)} UDP packets:")
+            for i, p in enumerate(all_resp):
+                print(f"  Packet {i+1}: {p.summary()}")
             if DEBUG:
                 print(f'DEBUG: DHCP response count: {len(resp)}')
                 for p in resp: print(p.summary())
