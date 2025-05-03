@@ -389,10 +389,44 @@ def restore_state(iface, state):
 # Configure main interface
 def configure_interface(iface, ip_addr, netmask):
     print(f'Configuring {iface} → {ip_addr}/{netmask}')
+    
+    # Get a list of all network interfaces
+    print("Getting list of network interfaces...")
+    interfaces_output = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+    interfaces = []
+    for line in interfaces_output.splitlines():
+        if ': ' in line:
+            # Extract interface name (remove number and colon)
+            interface_name = line.split(': ')[1].split('@')[0]
+            interfaces.append(interface_name)
+    
+    # Disable all interfaces except end0 and loopback
+    print("Disabling all interfaces except end0 and loopback...")
+    for interface in interfaces:
+        if interface != 'end0' and interface != 'lo' and interface != iface:
+            print(f"Disabling interface {interface}...")
+            run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+    
+    # Configure the specified interface
+    print(f'Configuring {iface}...')
     prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-    run_cmd(['ip','addr','flush','dev',iface], check=True)
-    run_cmd(['ip','addr','add',f'{ip_addr}/{prefix}','dev',iface], check=True)
-    run_cmd(['ip','link','set','dev',iface,'up'], check=True)
+    
+    # First disable the interface
+    print(f"Disabling {iface} before configuration...")
+    run_cmd(['ip', 'link', 'set', 'dev', iface, 'down'], check=False)
+    
+    # Then flush and configure
+    print(f"Flushing and configuring {iface}...")
+    run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=True)
+    run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
+    
+    # Finally enable the interface
+    print(f"Enabling {iface}...")
+    run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+    
+    # Wait a moment for the interface to come up
+    print("Waiting for interface to come up...")
+    time.sleep(2)
 
 # Add loopbacks
 def add_loopbacks(m1,m2,client):
