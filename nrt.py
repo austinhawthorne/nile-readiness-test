@@ -459,7 +459,7 @@ def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret,
                 iface_mac = str(RandMAC())
             
             # Create a more detailed DHCP packet
-            client_mac = RandMAC()
+            client_mac = str(RandMAC())
             
             print(f"DHCP Test Details:")
             print(f"  Interface: {iface} (MAC: {iface_mac})")
