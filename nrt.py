@@ -45,22 +45,6 @@ GUEST_IPS = ["145.40.90.203", "145.40.64.129", "145.40.113.105"]
 UDP_PORT = 6081
 SSL_PORT = 443
 
-# Validate if a string is a valid IP address
-def is_valid_ip(ip: str) -> bool:
-    """
-    Validate if a string is a valid IP address.
-    
-    Args:
-        ip: String to validate as IP address
-        
-    Returns:
-        bool: True if valid IP address, False otherwise
-    """
-    ip_pattern = r'^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$'
-    if re.match(ip_pattern, ip):
-        # Ensure each section is between 0 and 255
-        return all(0 <= int(num) <= 255 for num in ip.split('.'))
-    return False
 
 # Check UDP connectivity using netcat
 def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
@@ -136,49 +120,7 @@ def check_ssl_certificate(ip: str, hostname: str, expected_org: str) -> bool:
         print(f"  Error: {e}")
         return False
 
-# Check DNS resolution
-def check_dns_resolution(hostname: str, dns_server: str) -> bool:
-    """
-    Test DNS resolution using specified DNS server.
-    
-    Args:
-        hostname: Hostname to resolve
-        dns_server: DNS server to use
-        
-    Returns:
-        bool: True if DNS resolution successful, False otherwise
-    """
-    try:
-        result = subprocess.run(
-            ['nslookup', hostname, dns_server],
-            capture_output=True,
-            text=True
-        )
-        
-        if "Non-authoritative" in result.stdout or "Address" in result.stdout:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"  Error: {e}")
-        return False
 
-# Resolve all IPs for a hostname
-def resolve_all_ips(hostname: str) -> list:
-    """
-    Resolve all IP addresses for a hostname.
-    
-    Args:
-        hostname: Hostname to resolve
-        
-    Returns:
-        List[str]: List of IP addresses
-    """
-    try:
-        return socket.gethostbyname_ex(hostname)[2]
-    except socket.gaierror as e:
-        print(f"DNS resolution failed for {hostname}: {e}")
-        return []
 
 # Parse command line arguments
 def parse_args():
@@ -213,7 +155,9 @@ required_bins = {
     'radclient': 'FreeRADIUS client (radclient)',
     'dig': 'DNS lookup utility (dig)',
     'ntpdate': 'NTP utility (ntpdate)',
-    'curl': 'HTTPS test utility (curl)'
+    'curl': 'HTTPS test utility (curl)',
+    'nc': 'Netcat (nc) for UDP connectivity testing',
+    'openssl': 'OpenSSL for SSL certificate verification'
 }
 missing = [name for name in required_bins if shutil.which(name) is None]
 if missing:
@@ -222,7 +166,7 @@ if missing:
         print(f'  - {required_bins[name]}')
     print()
     print('Please install them, e.g.:')
-    print('  sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl')
+    print('  sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl netcat-openbsd openssl')
     sys.exit(1)
 
 # Wrapper for subprocess.run with debug
@@ -576,11 +520,17 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 
     # Full suite
     print(f'\nFull Test Suite:')
+    
+    # Ping tests
+    print(f'\n=== Ping tests ===')
     for tgt in dns_servers:
         r = run_cmd(['ping', '-c', '4', tgt], capture_output=True, text=True)
         result = r.returncode == 0
         print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
         test_results.append((f'Ping {tgt}', result))
+    
+    # DNS tests
+    print(f'\n=== DNS tests ===')
     for d in dns_servers:
         r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
         ok = (r.returncode==0 and bool(r.stdout.strip()))
@@ -713,8 +663,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     else:
         print('Skipping RADIUS tests')
 
-    # NTP
-    print(f'=== NTP tests ===')
+    # NTP tests
+    print(f'\n=== NTP tests ===')
     for ntp in ('time.google.com', 'pool.ntp.org'):
         r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
         result = r.returncode == 0
@@ -725,7 +675,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f'=== HTTPS and SSL Certificate tests ===')
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud
-    print(f'Testing HTTPS and SSL for {NILE_HOSTNAME}...')
+    print(f'\nTesting HTTPS for {NILE_HOSTNAME}...')
     parsed = urlparse(f'https://{NILE_HOSTNAME}')
     host, port = parsed.hostname, parsed.port or 443
     try:
@@ -740,8 +690,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {NILE_HOSTNAME}...')
-    nile_ips = resolve_all_ips(NILE_HOSTNAME)
-    if nile_ips:
+    # Use dig to resolve the hostname to IP addresses
+    r = run_cmd(['dig', NILE_HOSTNAME, '+short'], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        nile_ips = r.stdout.strip().split('\n')
         print(f"Resolved {NILE_HOSTNAME} to: {', '.join(nile_ips)}")
         nile_ssl_success = False
         for ip in nile_ips:
@@ -757,7 +709,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", False))
     
     # Test HTTPS connectivity and SSL certificates for Amazon S3
-    print(f'\nTesting HTTPS and SSL for {S3_HOSTNAME}...')
+    print(f'\nTesting HTTPS for {S3_HOSTNAME}...')
     parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
     host, port = parsed.hostname, parsed.port or 443
     try:
@@ -772,8 +724,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {S3_HOSTNAME}...')
-    s3_ips = resolve_all_ips(S3_HOSTNAME)
-    if s3_ips:
+    # Use dig to resolve the hostname to IP addresses
+    r = run_cmd(['dig', S3_HOSTNAME, '+short'], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        s3_ips = r.stdout.strip().split('\n')
         print(f"Resolved {S3_HOSTNAME} to: {', '.join(s3_ips)}")
         s3_ssl_success = False
         # Only test the first 2 IPs for S3
@@ -804,7 +758,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     test_results.append((f'HTTPS u1.nilesecure.com', https_ok))
     
     # UDP Connectivity Check for Guest Access
-    print(f'\n=== UDP Connectivity Check ===')
+    print(f'\n=== UDP Connectivity Check for Guest Access ===')
     guest_success = False
     for ip in GUEST_IPS:
         print(f"Testing UDP connectivity to {ip}:{UDP_PORT}...")
@@ -814,30 +768,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             break
         else:
             print(f"UDP connectivity to {ip}:{UDP_PORT}: {RED}Fail{RESET}")
-    test_results.append(("UDP Connectivity for Guest Access", guest_success))
+    test_results.append(("UDP Connectivity Check for Guest Access", guest_success))
     
-    # Additional DNS Resolution Checks
-    print(f'\n=== Additional DNS Resolution Checks ===')
-    
-    # Test with Google DNS if not already used
-    if GOOGLE_DNS not in dns_servers:
-        print(f"Testing DNS resolution using Google DNS ({GOOGLE_DNS})...")
-        google_dns_success = check_dns_resolution(NILE_HOSTNAME, GOOGLE_DNS)
-        print(f"DNS resolution using Google DNS: " + (GREEN+'Success'+RESET if google_dns_success else RED+'Fail'+RESET))
-        test_results.append(("DNS Resolution using Google DNS", google_dns_success))
-    
-    
-    # Custom DNS Resolution Check (optional)
-    custom_dns = input('Perform custom DNS resolution test? [y/N]: ').strip().lower()
-    if custom_dns.startswith('y'):
-        custom_dns_server = prompt_nonempty('Enter custom DNS server IP: ')
-        if is_valid_ip(custom_dns_server):
-            print(f"Testing DNS resolution using custom DNS ({custom_dns_server})...")
-            custom_dns_success = check_dns_resolution(NILE_HOSTNAME, custom_dns_server)
-            print(f"DNS resolution using custom DNS: " + (GREEN+'Success'+RESET if custom_dns_success else RED+'Fail'+RESET))
-            test_results.append((f"DNS Resolution using custom DNS ({custom_dns_server})", custom_dns_success))
-        else:
-            print(f"Invalid IP address: {custom_dns_server}")
     
     return test_results
 

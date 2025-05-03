@@ -25,7 +25,8 @@ Running this script will test:
     - Will test UDP connectivity to Guest Access servers on port 6081
 - Additional DNS Resolution Checks
     - Will test DNS resolution using Google DNS
-    - Optional custom DNS resolution check
+    - Will use any custom DNS servers provided during initial DNS tests
+    - Optional additional custom DNS resolution check
 
 
 This approach allows you to:
