@@ -270,6 +270,10 @@ def get_user_input(config_file=None):
         secret = config.get('radius_secret')
         username = config.get('radius_username')
         password = config.get('radius_password')
+        run_custom_dns_tests = config.get('run_custom_dns_tests', False)
+        custom_dns_servers = config.get('custom_dns_servers', []) if run_custom_dns_tests else []
+        run_custom_ntp_tests = config.get('run_custom_ntp_tests', False)
+        custom_ntp_servers = config.get('custom_ntp_servers', []) if run_custom_ntp_tests else []
         
         # Validate required fields
         missing = []
@@ -351,10 +355,33 @@ def get_user_input(config_file=None):
             username = prompt_nonempty('RADIUS test username: ')
             password = prompt_nonempty('RADIUS test password: ')
 
+    # For interactive mode, custom_dns_servers and custom_ntp_servers are empty lists
+    if not config_file:
+        custom_dns_servers = []
+        custom_ntp_servers = []
+        
+        # Ask for custom DNS servers
+        custom_dns = input('Add custom DNS servers for testing? [y/N]: ').strip().lower()
+        if custom_dns.startswith('y'):
+            custom_dns_input = prompt_nonempty('Enter custom DNS server IP(s) (comma-separated): ')
+            custom_dns_servers = [ip.strip() for ip in custom_dns_input.split(',')]
+            
+        # Ask for custom NTP servers
+        custom_ntp = input('Add custom NTP servers for testing? [y/N]: ').strip().lower()
+        if custom_ntp.startswith('y'):
+            custom_ntp_input = prompt_nonempty('Enter custom NTP server(s) (comma-separated): ')
+            custom_ntp_servers = [server.strip() for server in custom_ntp_input.split(',')]
+    
+    # Print custom DNS and NTP servers if provided
+    if custom_dns_servers:
+        print(f"  Custom DNS Servers: {', '.join(custom_dns_servers)}")
+    if custom_ntp_servers:
+        print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
+    
     return (frr_iface, ip_addr, netmask, gateway,
             mgmt1, mgmt2, client_subnet,
             dhcp_servers, radius_servers, secret, username, password,
-            run_dhcp, run_radius)
+            run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
 
 # Record/restore host state
 def record_state(iface):
@@ -659,7 +686,10 @@ def configure_static_route(gateway, iface):
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
 
 # Connectivity tests with DNS fallback logic
-def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
+def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius, custom_dns_servers=None, custom_ntp_servers=None):
+    # Initialize empty lists if None
+    custom_dns_servers = custom_dns_servers or []
+    custom_ntp_servers = custom_ntp_servers or []
     # Dictionary to store test results for summary
     test_results = []
     # Set initial DNS
@@ -725,6 +755,15 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
         test_results.append((f'DNS @{d}', ok))
+    
+    # Custom DNS tests if provided
+    if custom_dns_servers:
+        print(f'\n=== Custom DNS tests ===')
+        for d in custom_dns_servers:
+            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+            ok = (r.returncode==0 and bool(r.stdout.strip()))
+            print(f'Custom DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Custom DNS @{d}', ok))
 
     # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
@@ -854,11 +893,21 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 
     # NTP tests
     print(f'\n=== NTP tests ===')
+    # Test default NTP servers
     for ntp in ('time.google.com', 'pool.ntp.org'):
         r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
         result = r.returncode == 0
         print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
         test_results.append((f'NTP {ntp}', result))
+    
+    # Test custom NTP servers if provided
+    if custom_ntp_servers:
+        print(f'\n=== Custom NTP tests ===')
+        for ntp in custom_ntp_servers:
+            r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
+            result = r.returncode == 0
+            print(f'Custom NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Custom NTP {ntp}', result))
 
     # HTTPS and SSL Certificate tests
     print(f'=== HTTPS and SSL Certificate tests ===')
@@ -982,7 +1031,7 @@ def main():
     # Get user input from config file or interactive prompts
     (frr_iface, ip_addr, netmask, gateway, mgmt1, mgmt2, client_subnet,
      dhcp_servers, radius_servers, secret, username, password,
-     run_dhcp, run_radius) = get_user_input(args.config)
+     run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers) = get_user_input(args.config)
 
     # Record the original state of the interface
     state = record_state(frr_iface)
@@ -1012,7 +1061,7 @@ def main():
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
         
         # Run connectivity tests
-        test_results = run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
+        test_results = run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
     
     finally:
         # Restore the original state

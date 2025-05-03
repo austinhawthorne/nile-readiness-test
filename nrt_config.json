@@ -12,5 +12,9 @@
   "radius_servers": [],
   "radius_secret": "",
   "radius_username": "",
-  "radius_password": ""
+  "radius_password": "",
+  "run_custom_dns_tests": false,
+  "custom_dns_servers": ["192.168.1.53", "10.0.0.53"],
+  "run_custom_ntp_tests": false,
+  "custom_ntp_servers": ["ntp.internal.example.com", "10.0.0.123"]
 }
