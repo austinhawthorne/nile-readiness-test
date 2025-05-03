@@ -378,7 +378,7 @@ def configure_static_route(gateway,iface):
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
 
 # Connectivity tests with DNS fallback logic
-def run_tests(iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
+def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius):
     # Set initial DNS
     dns_servers = ['8.8.8.8', '8.8.4.4']
     
@@ -603,7 +603,7 @@ def main():
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
         
         # Run connectivity tests
-        run_tests(frr_iface, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
+        run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius)
     
     finally:
         # Restore the original state
