@@ -746,30 +746,34 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     # Full suite
     print(f'\nFull Test Suite:')
     
+    # Get the IP address of the mgmt1 dummy loopback interface
+    mgmt1_ip = str(ipaddress.IPv4Network(mgmt1).network_address+1)
+    print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
+    
     # Ping tests
     print(f'\n=== Ping tests ===')
     for tgt in dns_servers:
-        r = run_cmd(['ping', '-c', '4', tgt], capture_output=True, text=True)
+        r = run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=True, text=True)
         result = r.returncode == 0
-        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'Ping {tgt}', result))
+        print(f'Ping {tgt} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'Ping {tgt} from mgmt1', result))
     
     # DNS tests
     print(f'\n=== DNS tests ===')
     for d in dns_servers:
-        r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+        r = run_cmd(['dig', f'@{d}', '-b', mgmt1_ip, 'www.google.com', '+short'], capture_output=True, text=True)
         ok = (r.returncode==0 and bool(r.stdout.strip()))
-        print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-        test_results.append((f'DNS @{d}', ok))
+        print(f'DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'DNS @{d} from mgmt1', ok))
     
     # Custom DNS tests if provided
     if custom_dns_servers:
         print(f'\n=== Custom DNS tests ===')
         for d in custom_dns_servers:
-            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+            r = run_cmd(['dig', f'@{d}', '-b', mgmt1_ip, 'www.google.com', '+short'], capture_output=True, text=True)
             ok = (r.returncode==0 and bool(r.stdout.strip()))
-            print(f'Custom DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-            test_results.append((f'Custom DNS @{d}', ok))
+            print(f'Custom DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Custom DNS @{d} from mgmt1', ok))
 
     # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
@@ -901,36 +905,38 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f'\n=== NTP tests ===')
     # Test default NTP servers
     for ntp in ('time.google.com', 'pool.ntp.org'):
-        r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
+        r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
         result = r.returncode == 0
-        print(f'NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'NTP {ntp}', result))
+        print(f'NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'NTP {ntp} from mgmt1', result))
     
     # Test custom NTP servers if provided
     if custom_ntp_servers:
         print(f'\n=== Custom NTP tests ===')
         for ntp in custom_ntp_servers:
-            r = run_cmd(['ntpdate', '-q', ntp], capture_output=True, text=True)
+            r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
             result = r.returncode == 0
-            print(f'Custom NTP {ntp}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-            test_results.append((f'Custom NTP {ntp}', result))
+            print(f'Custom NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Custom NTP {ntp} from mgmt1', result))
 
     # HTTPS and SSL Certificate tests
     print(f'=== HTTPS and SSL Certificate tests ===')
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud
-    print(f'\nTesting HTTPS for {NILE_HOSTNAME}...')
+    print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
     parsed = urlparse(f'https://{NILE_HOSTNAME}')
     host, port = parsed.hostname, parsed.port or 443
     try:
-        sock = socket.create_connection((host, port), timeout=5)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
         sock.close()
         https_ok = True
-        print(f'HTTPS {NILE_HOSTNAME}: {GREEN}Success{RESET}')
-    except:
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
         https_ok = False
-        print(f'HTTPS {NILE_HOSTNAME}: {RED}Fail{RESET}')
-    test_results.append((f'HTTPS {NILE_HOSTNAME}', https_ok))
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS {NILE_HOSTNAME} from mgmt1', https_ok))
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {NILE_HOSTNAME}...')
@@ -953,18 +959,20 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", False))
     
     # Test HTTPS connectivity and SSL certificates for Amazon S3
-    print(f'\nTesting HTTPS for {S3_HOSTNAME}...')
+    print(f'\nTesting HTTPS for {S3_HOSTNAME} from {mgmt1_ip}...')
     parsed = urlparse(f'https://{S3_HOSTNAME}/nile-prod-us-west-2')
     host, port = parsed.hostname, parsed.port or 443
     try:
-        sock = socket.create_connection((host, port), timeout=5)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
         sock.close()
         https_ok = True
-        print(f'HTTPS {S3_HOSTNAME}: {GREEN}Success{RESET}')
-    except:
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
         https_ok = False
-        print(f'HTTPS {S3_HOSTNAME}: {RED}Fail{RESET}')
-    test_results.append((f'HTTPS {S3_HOSTNAME}', https_ok))
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS {S3_HOSTNAME} from mgmt1', https_ok))
     
     # Now check the SSL certificate
     print(f'Checking SSL certificate for {S3_HOSTNAME}...')
@@ -988,18 +996,20 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         test_results.append((f"SSL Certificate for {S3_HOSTNAME}", False))
     
     # Test HTTPS connectivity for Nile Secure
-    print(f'\nTesting HTTPS for u1.nilesecure.com...')
+    print(f'\nTesting HTTPS for u1.nilesecure.com from {mgmt1_ip}...')
     parsed = urlparse('https://u1.nilesecure.com')
     host, port = parsed.hostname, parsed.port or 443
     try:
-        sock = socket.create_connection((host, port), timeout=5)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
         sock.close()
         https_ok = True
-        print(f'HTTPS u1.nilesecure.com: {GREEN}Success{RESET}')
-    except:
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
         https_ok = False
-        print(f'HTTPS u1.nilesecure.com: {RED}Fail{RESET}')
-    test_results.append((f'HTTPS u1.nilesecure.com', https_ok))
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+    test_results.append((f'HTTPS u1.nilesecure.com from mgmt1', https_ok))
     
     # UDP Connectivity Check for Guest Access
     print(f'\n=== UDP Connectivity Check for Guest Access ===')
@@ -1038,6 +1048,12 @@ def main():
     (frr_iface, ip_addr, netmask, gateway, mgmt1, mgmt2, client_subnet,
      dhcp_servers, radius_servers, secret, username, password,
      run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers) = get_user_input(args.config)
+    
+    # Print summary of custom DNS and NTP servers if provided
+    if custom_dns_servers:
+        print(f"Will test custom DNS servers: {', '.join(custom_dns_servers)}")
+    if custom_ntp_servers:
+        print(f"Will test custom NTP servers: {', '.join(custom_ntp_servers)}")
 
     # Record the original state of the interface
     state = record_state(frr_iface)
