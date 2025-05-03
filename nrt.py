@@ -711,23 +711,23 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Initial connectivity
     ping_ok = dns_ok = False
-    print(f'Initial Ping Tests:')
+    print(f'Initial Ping Tests from {ip_addr}:')
     for tgt in dns_servers:
-        r = run_cmd(['ping', '-c', '2', tgt], capture_output=True)
+        r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
         result = r.returncode == 0
-        print(f'Ping {tgt}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'Initial Ping {tgt}', result))
+        print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'Initial Ping {tgt} from {ip_addr}', result))
         ping_ok |= result
 
     # Initial DNS tests with retry prompt
     while True:
-        print(f'Initial DNS Tests (@ ' + ', '.join(dns_servers) + '):')
+        print(f'Initial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
         dns_ok = False
         for d in dns_servers:
-            r = run_cmd(['dig', f'@{d}', 'www.google.com', '+short'], capture_output=True, text=True)
+            r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
             ok = (r.returncode==0 and bool(r.stdout.strip()))
-            print(f'DNS @{d}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-            test_results.append((f'Initial DNS @{d}', ok))
+            print(f'DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Initial DNS @{d} from {ip_addr}', ok))
             dns_ok |= ok
         if dns_ok:
             break
@@ -765,7 +765,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         r = run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=True, text=True)
         result = r.returncode == 0
         print(f'Ping {tgt} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
-        test_results.append((f'Ping {tgt} from mgmt1', result))
+        test_results.append((f'Ping {tgt} from {mgmt1_ip}', result))
     
     # DNS tests
     print(f'\n=== DNS tests ===')
@@ -773,7 +773,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         r = run_cmd(['dig', f'@{d}', '-b', mgmt1_ip, 'www.google.com', '+short'], capture_output=True, text=True)
         ok = (r.returncode==0 and bool(r.stdout.strip()))
         print(f'DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-        test_results.append((f'DNS @{d} from mgmt1', ok))
+        test_results.append((f'DNS @{d} from {mgmt1_ip}', ok))
     
     # Custom DNS tests if provided
     if custom_dns_servers:
