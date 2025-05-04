@@ -412,12 +412,12 @@ def restore_state(iface, state):
     if DEBUG:
         print("Removing dummy interfaces...")
     for name in ('mgmt1','mgmt2','client'):
-        run_cmd(['ip','link','delete',f'dummy_{name}'], check=False)
+        run_cmd(['ip','link','delete',f'dummy_{name}'], check=False, capture_output=True)
     
     # Flush the interface
     if DEBUG:
         print(f"Flushing interface {iface}...")
-    run_cmd(['ip','addr','flush','dev',iface], check=True)
+    run_cmd(['ip','addr','flush','dev',iface], check=True, capture_output=True)
     
     # Apply a temporary IP configuration if there are no addresses in the state
     # This helps with the "Nexthop has invalid gateway" error
@@ -425,30 +425,30 @@ def restore_state(iface, state):
     if not state['addrs']:
         if DEBUG:
             print("No original addresses found, applying temporary IP configuration...")
-        run_cmd(['ip','addr','add','0.0.0.0/0','dev',iface], check=False)
-        run_cmd(['ip','link','set','dev',iface,'up'], check=False)
+        run_cmd(['ip','addr','add','0.0.0.0/0','dev',iface], check=False, capture_output=True)
+        run_cmd(['ip','link','set','dev',iface,'up'], check=False, capture_output=True)
     
     # Add back the original addresses
     if DEBUG:
         print("Restoring original IP addresses...")
     for addr in state['addrs']:
-        run_cmd(['ip','addr','add',addr,'dev',iface], check=False)
+        run_cmd(['ip','addr','add',addr,'dev',iface], check=False, capture_output=True)
     
     # Make sure the interface is up
     if DEBUG:
         print(f"Ensuring interface {iface} is up...")
-    run_cmd(['ip','link','set','dev',iface,'up'], check=False)
+    run_cmd(['ip','link','set','dev',iface,'up'], check=False, capture_output=True)
     
     # Flush default routes
     if DEBUG:
         print("Flushing default routes...")
-    run_cmd(['ip','route','flush','default'], check=False)
+    run_cmd(['ip','route','flush','default'], check=False, capture_output=True)
     
     # Restore FRR configuration
     if DEBUG:
         print("Restoring FRR configuration...")
     with open('/etc/frr/daemons','w') as f: f.write(state['daemons'])
-    run_cmd(['rm','-f','/etc/frr/frr.conf'], check=False)
+    run_cmd(['rm','-f','/etc/frr/frr.conf'], check=False, capture_output=True)
     
     # Restore DNS configuration
     if DEBUG:
@@ -458,8 +458,8 @@ def restore_state(iface, state):
     # Stop and disable FRR
     if DEBUG:
         print("Stopping and disabling FRR...")
-    run_cmd(['systemctl','stop','frr'], check=False)
-    run_cmd(['systemctl','disable','frr'], check=False)
+    run_cmd(['systemctl','stop','frr'], check=False, capture_output=True)
+    run_cmd(['systemctl','disable','frr'], check=False, capture_output=True)
     
     if DEBUG:
         print('Removed FRR config, stopped service, restored DNS.')
