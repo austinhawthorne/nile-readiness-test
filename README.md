@@ -80,11 +80,11 @@ Running this script will test:
 Create a JSON configuration file for `nrt.py`:
 ```json
 {
+  "mgmt_interface": "end0",
   "frr_interface": "enxf0a731f41761",
   "ip_address": "192.168.2.100",
   "netmask": "255.255.255.0",
   "gateway": "192.168.2.1",
-  "mgmt_interface": "end0",
   "nsb_subnet": "10.1.1.0/24",
   "sensor_subnet": "10.1.2.0/24",
   "client_subnet": "10.1.3.0/24",
