@@ -444,32 +444,6 @@ def restore_state(iface, state):
         print("Flushing default routes...")
     run_cmd(['ip','route','flush','default'], check=False)
     
-    # Add back the original routes with error handling
-    if DEBUG:
-        print("Restoring original routes...")
-    for r in state['routes']:
-        parts = r.split()
-        try:
-            # Try to add the route
-            run_cmd(['ip','route','add'] + parts, check=False)
-        except Exception as e:
-            if DEBUG:
-                print(f"Warning: Could not restore route {' '.join(parts)}: {e}")
-            # If the route has a gateway, try to add a direct route to the gateway first
-            if 'via' in parts:
-                gateway_index = parts.index('via') + 1
-                if gateway_index < len(parts):
-                    gateway = parts[gateway_index]
-                    if DEBUG:
-                        print(f"Attempting to add direct route to gateway {gateway}...")
-                    try:
-                        run_cmd(['ip','route','add',gateway,'dev',iface], check=False)
-                        # Try adding the original route again
-                        run_cmd(['ip','route','add'] + parts, check=False)
-                    except Exception as e2:
-                        if DEBUG:
-                            print(f"Warning: Could not add direct route to gateway {gateway}: {e2}")
-    
     # Restore FRR configuration
     if DEBUG:
         print("Restoring FRR configuration...")
@@ -492,7 +466,9 @@ def restore_state(iface, state):
 
 # Configure main interface
 def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
-    print(f'Configuring {iface} → {ip_addr}/{netmask}')
+
+    if DEBUG:
+        print(f'Configuring {iface} → {ip_addr}/{netmask}')
     
     # Get a list of all network interfaces
     if DEBUG:
@@ -600,7 +576,7 @@ def add_loopbacks(m1,m2,client):
 
 # OSPF Hello sniff
 def sniff_ospf_hello(iface, timeout=60):
-    print(f'Waiting for OSPF Hello on {iface}...')
+    print(f'\nWaiting for OSPF Hello on {iface}...')
     
     # Use scapy to sniff for OSPF Hello packets
     pkts = sniff(iface=iface, filter='ip proto 89', timeout=timeout, count=1)
@@ -653,7 +629,7 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
         '-c',f'ip ospf dead-interval {di}',
         '-c','exit','-c','end','-c','write memory'
     ]
-    run_cmd(cmds, check=True)
+    run_cmd(cmds, check=True, capture_output=True)
     
     # Verify interface is up and properly configured
     if DEBUG:    
@@ -769,7 +745,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Initial connectivity
     ping_ok = dns_ok = False
-    print(f'Initial Ping Tests from {ip_addr}:')
+    print(f'\nInitial Ping Tests from {ip_addr}:')
     for tgt in dns_servers:
         r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
         result = r.returncode == 0
@@ -779,7 +755,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 
     # Initial DNS tests with retry prompt
     while True:
-        print(f'Initial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
+        print(f'\nInitial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
         dns_ok = False
         for d in dns_servers:
             r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
@@ -840,7 +816,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 
     # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
-        print(f'=== DHCP tests (L3 relay) ===')
+        print(f'\n=== DHCP tests (L3 relay) ===')
         # Use the first IP of the client subnet as the helper IP (giaddr)
         helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
         print(f"Using client subnet first IP {helper_ip} as DHCP relay agent (giaddr)")
@@ -848,7 +824,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         # For the source IP, we should use the helper IP address (giaddr)
         # This is what the server will see as the source of the packet
         source_ip = helper_ip
-        print(f"Using helper IP {source_ip} as source IP for DHCP packets")
+        if DEBUG:
+            print(f"Using helper IP {source_ip} as source IP for DHCP packets")
         
         for srv in dhcp_servers:
             p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
@@ -874,16 +851,18 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             client_mac = dhcp_utils.random_mac()
             
             # Using dhcppython for DHCP testing
-            
-            print(f"DHCP Test Details:")
-            print(f"  Interface: {iface} (MAC: {iface_mac})")
-            print(f"  Source IP: {source_ip}")
-            print(f"  Destination IP: {srv}")
-            print(f"  Client MAC: {client_mac}")
+
+            if DEBUG:
+                print(f"DHCP Test Details:")
+                print(f"  Interface: {iface} (MAC: {iface_mac})")
+                print(f"  Source IP: {source_ip}")
+                print(f"  Destination IP: {srv}")
+                print(f"  Client MAC: {client_mac}")
             
             try:
                 # Create DHCP client using the main interface
-                print(f"Creating DHCP client on {iface} interface...")
+                if DEBUG:
+                    print(f"Creating DHCP client on {iface} interface...")
                 c = dhcp_client.DHCPClient(
                     iface,
                     send_from_port=67,  # Server port (for relay)
@@ -891,7 +870,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 )
                 
                 # Create a list of DHCP options
-                print(f"Setting up DHCP options...")
+                if DEBUG:
+                    print(f"Setting up DHCP options...")
                 options_list = dhcp_options.OptionList([
                     # Add standard options
                     dhcp_options.options.short_value_to_object(60, "nile-readiness-test"),  # Class identifier
@@ -900,7 +880,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                     dhcp_options.options.short_value_to_object(55, [1, 3, 6, 15, 26, 28, 51, 58, 59, 43])
                 ])
                 
-                print(f"Attempting to get DHCP lease from {srv}...")
+                if DEBUG:
+                    print(f"Attempting to get DHCP lease from {srv}...")
                 # Set broadcast=False for unicast to specific server
                 # Set server to the DHCP server IP
                 try:
@@ -913,8 +894,8 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                     )
                     
                     # If we get here, we got a lease
-                    print(f"Successfully obtained DHCP lease!")
                     if DEBUG:
+                        print(f"\nSuccessfully obtained DHCP lease!")
                         print(f"DEBUG: Lease details:")
                         print(f"  Your IP: {lease.ack.yiaddr}")
                         print(f"  Server IP: {lease.ack.siaddr}")
@@ -943,11 +924,11 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
                 test_results.append((f'DHCP relay to {srv}', result))
     else:
-        print('Skipping DHCP tests')
+        print('\nSkipping DHCP tests')
 
     # RADIUS with ping pre-check
     if run_radius:
-        print(f'=== RADIUS tests ===')
+        print(f'\n=== RADIUS tests ===')
         for srv in radius_servers:
             p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
             if p.returncode != 0:
@@ -962,7 +943,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             print(f'RADIUS {srv}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
             test_results.append((f'RADIUS {srv}', result))
     else:
-        print('Skipping RADIUS tests')
+        print('\nSkipping RADIUS tests')
 
     # NTP tests from main interface
     print(f'\n=== NTP tests from main interface ({ip_addr}) ===')
@@ -1047,7 +1028,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     r = run_cmd(['dig', NILE_HOSTNAME, '+short'], capture_output=True, text=True)
     if r.returncode == 0 and r.stdout.strip():
         nile_ips = r.stdout.strip().split('\n')
-        print(f"Resolved {NILE_HOSTNAME} to: {', '.join(nile_ips)}")
+        print(f"\nResolved {NILE_HOSTNAME} to: {', '.join(nile_ips)}")
         nile_ssl_success = False
         for ip in nile_ips:
             if check_ssl_certificate(ip, NILE_HOSTNAME, "Nile Global Inc."):
@@ -1109,7 +1090,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     r = run_cmd(['dig', S3_HOSTNAME, '+short'], capture_output=True, text=True)
     if r.returncode == 0 and r.stdout.strip():
         s3_ips = r.stdout.strip().split('\n')
-        print(f"Resolved {S3_HOSTNAME} to: {', '.join(s3_ips)}")
+        print(f"\nResolved {S3_HOSTNAME} to: {', '.join(s3_ips)}")
         s3_ssl_success = False
         # Only test the first 2 IPs for S3
         for ip in s3_ips[:2]:
