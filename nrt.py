@@ -1199,9 +1199,9 @@ def main():
     
     # Print summary of custom DNS and NTP servers if provided
     if custom_dns_servers:
-        print(f"Will test custom DNS servers: {', '.join(custom_dns_servers)}")
+        print(f"\nWill test custom DNS servers: {', '.join(custom_dns_servers)}")
     if custom_ntp_servers:
-        print(f"Will test custom NTP servers: {', '.join(custom_ntp_servers)}")
+        print(f"\nWill test custom NTP servers: {', '.join(custom_ntp_servers)}")
 
     # Record the original state of the interface
     state = record_state(frr_iface)
