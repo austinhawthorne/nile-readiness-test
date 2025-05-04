@@ -825,15 +825,6 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         print(f'DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
         test_results.append((f'DNS @{d} from {mgmt1_ip}', ok))
     
-    # Custom DNS tests if provided
-    if custom_dns_servers:
-        print(f'\n=== Custom DNS tests ===')
-        for d in custom_dns_servers:
-            r = run_cmd(['dig', f'@{d}', '-b', mgmt1_ip, 'www.google.com', '+short'], capture_output=True, text=True)
-            ok = (r.returncode==0 and bool(r.stdout.strip()))
-            print(f'Custom DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-            test_results.append((f'Custom DNS @{d} from mgmt1', ok))
-
     # DHCP relay with ping pre-check - using dhcppython library
     if run_dhcp:
         print(f'\n=== DHCP tests (L3 relay) ===')
