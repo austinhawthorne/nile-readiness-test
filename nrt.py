@@ -1201,11 +1201,13 @@ def main():
         
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
-        
+
+        wait(5)
+                
         # Configure static route
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
         configure_static_route(gateway, frr_iface)
-        
+
         # Update scapy's routing table
         conf.route.resync()
         
@@ -1218,7 +1220,10 @@ def main():
         # Check OSPF status
         ospf_ok = show_ospf_status()
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
-        
+
+
+
+
         # Run connectivity tests
         test_results = run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
     
