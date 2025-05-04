@@ -701,24 +701,6 @@ def show_ospf_status():
         print(f'\n=== Kernel Routing Table ===')
         print(route_output)
     
-
-    '''
-    # Add a default route via the upstream router after OSPF has had time to establish
-    if DEBUG:
-        print("Adding default route via upstream router")
-    gateway_ip = None
-    for line in route_output.splitlines():
-        if 'via' in line and not line.startswith('default'):
-            parts = line.split()
-            if 'via' in parts:
-                gateway_ip = parts[parts.index('via') + 1]
-                break
-    
-    if gateway_ip:
-        run_cmd(['ip', 'route', 'add', 'default', 'via', gateway_ip], check=False)
-        print(f"Added default route via {gateway_ip}")
-    '''
-    
     return success
 
 # Add floating static default
@@ -746,29 +728,67 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     # Initial connectivity
     ping_ok = dns_ok = False
     print(f'\nInitial Ping Tests from {ip_addr}:')
+    
+    # Test default DNS servers
     for tgt in dns_servers:
         r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
         result = r.returncode == 0
         print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
         test_results.append((f'Initial Ping {tgt} from {ip_addr}', result))
         ping_ok |= result
+    
+    # Test custom DNS servers if provided
+    if custom_dns_servers:
+        print(f'\nCustom DNS Server Ping Tests from {ip_addr}:')
+        custom_ping_ok = False
+        for tgt in custom_dns_servers:
+            r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
+            result = r.returncode == 0
+            print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Initial Ping Custom DNS {tgt} from {ip_addr}', result))
+            custom_ping_ok |= result
+        
+        # Update ping_ok to include custom DNS server ping results
+        ping_ok |= custom_ping_ok
 
-    # Initial DNS tests with retry prompt
-    while True:
-        print(f'\nInitial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
-        dns_ok = False
-        for d in dns_servers:
+
+    print(f'\nInitial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
+    for d in dns_servers:
+        r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
+        ok = (r.returncode==0 and bool(r.stdout.strip()))
+        print(f'DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'Initial DNS @{d} from {ip_addr}', ok))
+
+    # Custom DNS tests from iface interface if provided
+    if custom_dns_servers:
+        print(f'\n=== Custom DNS tests from {ip_addr} ===')
+        for d in custom_dns_servers:
             r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
             ok = (r.returncode==0 and bool(r.stdout.strip()))
-            print(f'DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
-            test_results.append((f'Initial DNS @{d} from {ip_addr}', ok))
-            dns_ok |= ok
-        if dns_ok:
-            break
-        ans = input('Default DNS tests failed. Enter alternate DNS servers? [y/N]: ').strip().lower()
-        if not ans.startswith('y'):
-            print('Cannot continue without DNS. Exiting.') 
-            sys.exit(1)
+            print(f'Custom DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Custom DNS @{d} from {ip_addr}', ok))
+        
+        # If custom DNS servers are provided and successful, use them
+        successful_custom_dns = []
+        for d in custom_dns_servers:
+            r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
+            if r.returncode == 0 and bool(r.stdout.strip()):
+                successful_custom_dns.append(d)
+        
+        if successful_custom_dns:
+            print(f"\nUsing successful custom DNS servers: {', '.join(successful_custom_dns)}")
+            dns_servers = successful_custom_dns
+            write_resolv(dns_servers)
+            # Skip the prompt for DNS servers if we're using custom ones
+            if not args.config:  # Only in interactive mode
+                print("Using custom DNS servers instead of prompting for new ones.")
+        else:
+            # If no custom DNS servers were successful, prompt for new ones
+            new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
+            dns_servers = [s.strip() for s in new_dns.split(',')]
+            write_resolv(dns_servers)
+    else:
+        # No custom DNS servers provided, prompt for new ones
         new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
         dns_servers = [s.strip() for s in new_dns.split(',')]
         write_resolv(dns_servers)
