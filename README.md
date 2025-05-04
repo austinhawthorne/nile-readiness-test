@@ -82,20 +82,25 @@ Create a JSON configuration file for `nrt.py`:
 {
   "mgmt_interface": "end0",
   "frr_interface": "enxf0a731f41761",
-  "ip_address": "192.168.2.100",
-  "netmask": "255.255.255.0",
-  "gateway": "192.168.2.1",
-  "nsb_subnet": "10.1.1.0/24",
-  "sensor_subnet": "10.1.2.0/24",
-  "client_subnet": "10.1.3.0/24",
+  "ip_address": "10.200.1.2",
+  "netmask": "255.255.255.252",
+  "gateway": "10.200.1.1",
+  "nsb_subnet": "10.200.10.0/24",
+  "sensor_subnet": "10.200.12.0/24",
+  "client_subnet": "10.234.3.0/24",
   "run_dhcp_tests": true,
-  "dhcp_servers": ["192.168.2.10"],
+  "dhcp_servers": ["172.27.5.5"],
   "run_radius_tests": false,
+  "radius_servers": [],
+  "radius_secret": "",
+  "radius_username": "",
+  "radius_password": "",
   "run_custom_dns_tests": true,
-  "custom_dns_servers": ["192.168.1.53", "10.0.0.53"],
-  "run_custom_ntp_tests": true,
+  "custom_dns_servers": ["4.2.2.1", "1.1.1.1"],
+  "run_custom_ntp_tests": false,
   "custom_ntp_servers": ["ntp.internal.example.com", "10.0.0.123"]
 }
+
 ```
 
 ## Usage
