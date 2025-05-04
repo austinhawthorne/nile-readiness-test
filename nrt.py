@@ -1023,7 +1023,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
-    print(f'Checking SSL certificate for {NILE_HOSTNAME}...')
+    print(f'\nChecking SSL certificate for {NILE_HOSTNAME}...')
     # Use dig to resolve the hostname to IP addresses
     r = run_cmd(['dig', NILE_HOSTNAME, '+short'], capture_output=True, text=True)
     if r.returncode == 0 and r.stdout.strip():
@@ -1085,7 +1085,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     test_results.append((f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}', https_ok))
     
     # Now check the SSL certificate
-    print(f'Checking SSL certificate for {S3_HOSTNAME}...')
+    print(f'\nChecking SSL certificate for {S3_HOSTNAME}...')
     # Use dig to resolve the hostname to IP addresses
     r = run_cmd(['dig', S3_HOSTNAME, '+short'], capture_output=True, text=True)
     if r.returncode == 0 and r.stdout.strip():
