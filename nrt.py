@@ -1202,8 +1202,8 @@ def main():
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
 
-        wait(5)
-                
+        time.sleep(5)
+
         # Configure static route
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
         configure_static_route(gateway, frr_iface)
