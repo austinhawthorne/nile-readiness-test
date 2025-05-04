@@ -105,7 +105,7 @@ Create a JSON configuration file for `nrt.py`:
 
 ## Usage
 
-Run the FRR tests:
+Run the readiness tests:
 
 ```
 sudo ./nrt.py --config nrt_config.json
