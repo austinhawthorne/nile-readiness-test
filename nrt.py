@@ -315,6 +315,7 @@ def get_user_input(config_file=None):
             sys.exit(1)
             
         print("\nUsing configuration from file:")
+        print(f"  Management Interface: {mgmt_interface}")
         print(f"  NSB Testing Interface: {test_iface}")
         print(f"  IP Address: {ip_addr}")
         print(f"  Netmask: {netmask}")
