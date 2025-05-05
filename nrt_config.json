@@ -1,6 +1,6 @@
 {
   "mgmt_interface": "end0",
-  "frr_interface": "enxf0a731f41761",
+  "test_interface": "enxf0a731f41761",
   "ip_address": "10.200.1.2",
   "netmask": "255.255.255.252",
   "gateway": "10.200.1.1",

@@ -256,7 +256,7 @@ def get_user_input(config_file=None):
     # If config file is provided, use it
     if config_file:
         config = read_config(config_file)
-        frr_iface = config.get('frr_interface', 'enxf0a731f41761')
+        test_iface = config.get('test_interface', 'enxf0a731f41761')
         ip_addr = config.get('ip_address')
         netmask = config.get('netmask')
         gateway = config.get('gateway')
@@ -315,7 +315,7 @@ def get_user_input(config_file=None):
             sys.exit(1)
             
         print("\nUsing configuration from file:")
-        print(f"  NSB Testing Interface: {frr_iface}")
+        print(f"  NSB Testing Interface: {test_iface}")
         print(f"  IP Address: {ip_addr}")
         print(f"  Netmask: {netmask}")
         print(f"  Gateway: {gateway}")
@@ -339,7 +339,7 @@ def get_user_input(config_file=None):
         print("\nNetwork Interface Configuration:")
         print("--------------------------------")
         mgmt_interface = prompt_nonempty('Management interface of host to keep enabled (default: end0): ') or 'end0'
-        frr_iface     = prompt_nonempty('Interface for Nile Readiness tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
+        test_iface     = prompt_nonempty('Interface for Nile Readiness tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
         ip_addr       = prompt_nonempty('IP address for NSB Gateway interface: ')
         netmask       = prompt_nonempty('Netmask (e.g. 255.255.255.0): ')
         gateway       = prompt_nonempty('Router or Firewall IP: ')
@@ -386,7 +386,7 @@ def get_user_input(config_file=None):
     if custom_ntp_servers:
         print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
     
-    return (frr_iface, ip_addr, netmask, gateway, mgmt_interface,
+    return (test_iface, ip_addr, netmask, gateway, mgmt_interface,
             mgmt1, mgmt2, client_subnet,
             dhcp_servers, radius_servers, secret, username, password,
             run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
@@ -1192,7 +1192,7 @@ def print_test_summary(test_results):
 # Main flow
 def main():
     # Get user input from config file or interactive prompts
-    (frr_iface, ip_addr, netmask, gateway, mgmt_interface,
+    (test_iface, ip_addr, netmask, gateway, mgmt_interface,
      mgmt1, mgmt2, client_subnet,
      dhcp_servers, radius_servers, secret, username, password,
      run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers) = get_user_input(args.config)
@@ -1204,11 +1204,11 @@ def main():
         print(f"\nWill test custom NTP servers: {', '.join(custom_ntp_servers)}")
 
     # Record the original state of the interface
-    state = record_state(frr_iface)
+    state = record_state(test_iface)
     
     try:
         # Configure the interface
-        configure_interface(frr_iface, ip_addr, netmask, mgmt_interface)
+        configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
@@ -1217,16 +1217,16 @@ def main():
 
         # Configure static route
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-        configure_static_route(gateway, frr_iface)
+        configure_static_route(gateway, test_iface)
 
         # Update scapy's routing table
         conf.route.resync()
         
         # Sniff for OSPF Hello packets
-        up, area, hi, di = sniff_ospf_hello(frr_iface)
+        up, area, hi, di = sniff_ospf_hello(test_iface)
         
         # Configure OSPF
-        configure_ospf(frr_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
+        configure_ospf(test_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
         
         # Check OSPF status
         ospf_ok = show_ospf_status()
@@ -1236,11 +1236,11 @@ def main():
 
 
         # Run connectivity tests
-        test_results = run_tests(frr_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
+        test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
     
     finally:
         # Restore the original state
-        restore_state(frr_iface, state)
+        restore_state(test_iface, state)
         
         # Print test summary after restoring state
         if 'test_results' in locals():
