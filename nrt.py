@@ -338,11 +338,11 @@ def get_user_input(config_file=None):
         # Interactive mode
         print("\nNetwork Interface Configuration:")
         print("--------------------------------")
-        frr_iface     = prompt_nonempty('Interface for FRR tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
-        ip_addr       = prompt_nonempty('IP address for FRR interface: ')
+        mgmt_interface = prompt_nonempty('Management interface of host to keep enabled (default: end0): ') or 'end0'
+        frr_iface     = prompt_nonempty('Interface for Nile Readiness tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
+        ip_addr       = prompt_nonempty('IP address for NSB Gateway interface: ')
         netmask       = prompt_nonempty('Netmask (e.g. 255.255.255.0): ')
-        gateway       = prompt_nonempty('Gateway IP: ')
-        mgmt_interface = prompt_nonempty('Management interface to keep enabled (default: end0): ') or 'end0'
+        gateway       = prompt_nonempty('Router or Firewall IP: ')
         mgmt1         = prompt_nonempty('NSB subnet (CIDR, e.g. 192.168.1.0/24): ')
         mgmt2         = prompt_nonempty('Sensor subnet (CIDR): ')
         client_subnet = prompt_nonempty('Client subnet (CIDR): ')
