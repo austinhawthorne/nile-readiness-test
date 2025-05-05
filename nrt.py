@@ -41,7 +41,7 @@ import dhcppython.utils as dhcp_utils
 NILE_HOSTNAME = "ne-u1.nile-global.cloud"
 S3_HOSTNAME = "s3.us-west-2.amazonaws.com"
 GOOGLE_DNS = "8.8.8.8"
-GUEST_IPS = ["145.40.90.203", "145.40.64.129", "145.40.113.105"]
+GUEST_IPS = ["18.239.153.114","18.239.153.54","18.239.153.23","18.239.153.18"]
 UDP_PORT = 6081
 SSL_PORT = 443
 
@@ -315,7 +315,7 @@ def get_user_input(config_file=None):
             sys.exit(1)
             
         print("\nUsing configuration from file:")
-        print(f"  FRR Interface: {frr_iface}")
+        print(f"  NSB Testing Interface: {frr_iface}")
         print(f"  IP Address: {ip_addr}")
         print(f"  Netmask: {netmask}")
         print(f"  Gateway: {gateway}")
