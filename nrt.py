@@ -761,7 +761,7 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
     # Wait a moment for the interface to come up
     if DEBUG:
         print("Waiting for interface to come up...")
-    time.sleep(2)
+    time.sleep(5)
 
 # Add loopbacks
 def add_loopbacks(m1,m2,client):
@@ -1443,8 +1443,41 @@ def main():
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
 
-        time.sleep(5)
-
+        # Ensure the interface is up before proceeding
+        print(f"\nEnsuring interface {test_iface} is up and properly configured...")
+        max_retries = 5
+        retry_delay = 2
+        interface_up = False
+        
+        for attempt in range(max_retries):
+            # Check if interface is up
+            iface_status = run_cmd(['ip', 'link', 'show', 'dev', test_iface], capture_output=True, text=True).stdout
+            iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', test_iface], capture_output=True, text=True).stdout
+            
+            if "state UP" in iface_status and f"inet {ip_addr}" in iface_addr:
+                print(f"Interface {test_iface} is up and properly configured with IP {ip_addr}")
+                interface_up = True
+                break
+            else:
+                print(f"Attempt {attempt+1}/{max_retries}: Interface {test_iface} is not properly configured")
+                if "state UP" not in iface_status:
+                    print(f"  - Interface is not up, bringing it up...")
+                    run_cmd(['ip', 'link', 'set', 'dev', test_iface, 'up'], check=True)
+                
+                if f"inet {ip_addr}" not in iface_addr:
+                    print(f"  - IP address {ip_addr} not configured, reconfiguring...")
+                    run_cmd(['ip', 'addr', 'flush', 'dev', test_iface], check=False)
+                    prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
+                    run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', test_iface], check=True)
+                
+                print(f"  - Waiting {retry_delay} seconds before checking again...")
+                time.sleep(retry_delay)
+        
+        if not interface_up:
+            print(f"{RED}ERROR: Failed to bring up interface {test_iface} after {max_retries} attempts.{RESET}")
+            print("This will likely cause subsequent tests to fail.")
+            print("Continuing anyway, but expect failures...")
+        
         # Configure static route
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
         configure_static_route(gateway, test_iface)
