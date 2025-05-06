@@ -81,7 +81,7 @@ Running this script will test:
 3. Make the script executable:
    ```
    chmod +x nrt.py
-   ```a
+   ```an
 
 ## Configuration
 

@@ -938,15 +938,71 @@ def show_ospf_status():
 
 # Add floating static default
 def configure_static_route(gateway, iface):
+    """
+    Configure a static default route and verify it was added successfully.
+    
+    Args:
+        gateway: Gateway IP address
+        iface: Interface name
+        
+    Returns:
+        bool: True if route was added successfully, False otherwise
+    """
+    print(f"\nConfiguring static default route via {gateway} on {iface}...")
+    
+    # Try to add the route
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
+    
+    # Verify the route was added
+    max_retries = 5
+    retry_delay = 2
+    route_added = False
+    
+    for attempt in range(max_retries):
+        # Check if route exists
+        route_output = run_cmd(['ip','route','show','default'], capture_output=True, text=True).stdout
+        if f"default via {gateway}" in route_output:
+            print(f"Static default route via {gateway} successfully added")
+            route_added = True
+            break
+        else:
+            print(f"Attempt {attempt+1}/{max_retries}: Static route not found")
+            print(f"  - Current default routes:")
+            for line in route_output.splitlines():
+                print(f"    {line}")
+            
+            # Try to ensure interface is up before adding route
+            iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+            if "state UP" not in iface_status:
+                print(f"  - Interface {iface} is not up, bringing it up...")
+                run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+                time.sleep(1)  # Give it a moment to come up
+            
+            # Try adding the route again
+            print(f"  - Retrying route addition...")
+            # First try to delete any existing default routes to avoid conflicts
+            run_cmd(['ip','route','del','default'], check=False)
+            # Then add our route
+            run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
+            
+            print(f"  - Waiting {retry_delay} seconds before checking again...")
+            time.sleep(retry_delay)
+    
+    if not route_added:
+        print(f"{RED}ERROR: Failed to add static default route via {gateway} after {max_retries} attempts.{RESET}")
+        print("This will likely cause subsequent tests to fail.")
+        print("Continuing anyway, but expect failures...")
+    
+    return route_added
 
 # Connectivity tests with DNS fallback logic
-def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius, custom_dns_servers=None, custom_ntp_servers=None):
+def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius, custom_dns_servers=None, custom_ntp_servers=None, test_results=None):
     # Initialize empty lists if None
     custom_dns_servers = custom_dns_servers or []
     custom_ntp_servers = custom_ntp_servers or []
     # Dictionary to store test results for summary
-    test_results = []
+    if test_results is None:
+        test_results = []
     # Set initial DNS
     dns_servers = ['8.8.8.8', '8.8.4.4']
     
@@ -1474,9 +1530,13 @@ def main():
         # Add loopbacks
         add_loopbacks(mgmt1, mgmt2, client_subnet)
         
-        # Configure static route
+        # Configure static route and verify it was added successfully
         prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
-        configure_static_route(gateway, test_iface)
+        route_added = configure_static_route(gateway, test_iface)
+        
+        # Add the route status to the test results
+        test_results = []
+        test_results.append(("Static Default Route Configuration", route_added))
 
         # Update scapy's routing table
         conf.route.resync()
@@ -1494,8 +1554,8 @@ def main():
 
 
 
-        # Run connectivity tests
-        test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
+        # Run connectivity tests with the existing test_results list
+        test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers, test_results)
     
     finally:
         # Restore the original state
