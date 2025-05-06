@@ -51,6 +51,126 @@ UDP_PORT = 6081
 SSL_PORT = 443
 
 
+# Send a Geneve packet
+def send_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, vni: int = 3762, sport: int = 12345) -> tuple:
+    """
+    Send a Geneve packet to a target
+    
+    Args:
+        ip: Target IP address
+        source_ip: Source IP to use for the packet
+        port: UDP port to use (default: 6081)
+        vni: Virtual Network Identifier (default: 3762)
+        sport: Source port (default: 12345)
+        
+    Returns:
+        tuple: (success, packet) where success is a boolean indicating if the packet was sent successfully
+               and packet is the packet that was sent
+    """
+    if GENEVE is None:
+        print(f"  Warning: Scapy Geneve module not available.")
+        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
+        return False, None
+        
+    try:
+        # Craft the packet
+        pkt = IP(src=source_ip, dst=ip)/UDP(sport=sport, dport=port)/GENEVE(vni=vni)/Raw(load="Geneve probe")
+        
+        print(f"  Sending Geneve probe from {source_ip} to {ip}:{port} (VNI: {vni})")
+        if DEBUG:
+            print(f"DEBUG: Packet details: {pkt.summary()}")
+            print(f"DEBUG: Packet layers: {[layer.name for layer in pkt.layers()]}")
+            
+        # Send the packet
+        send(pkt, verbose=0)
+        return True, pkt
+    except Exception as e:
+        print(f"  Error sending Geneve packet: {e}")
+        print(f"  Troubleshooting:")
+        print(f"    - Check network connectivity to {ip}")
+        print(f"    - Verify source IP {source_ip} is correctly configured on your interface")
+        print(f"    - Check if you have permission to send raw packets (run as root/sudo)")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return False, None
+
+# Sniff for Geneve packets
+def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10, sport: int = 12345) -> tuple:
+    """
+    Sniff for Geneve packets from a specific source
+    
+    Args:
+        ip: Source IP address to filter for
+        source_ip: Our source IP (for filter construction)
+        port: UDP port to filter for (default: 6081)
+        timeout: Sniffing timeout in seconds (default: 10)
+        sport: Source port we used when sending (default: 12345)
+        
+    Returns:
+        tuple: (success, packet) where success is a boolean indicating if a Geneve packet was detected
+               and packet is the detected packet
+    """
+    if GENEVE is None:
+        print(f"  Warning: Scapy Geneve module not available.")
+        return False, None
+        
+    try:
+        # Create a filter for UDP packets from the target IP to our source port
+        filter_str = f"udp and src host {ip} and dst port {sport}"
+        
+        print(f"  Sniffing for Geneve responses from {ip} (timeout: {timeout}s)")
+        if DEBUG:
+            print(f"DEBUG: Using filter: {filter_str}")
+            
+        # Sniff for packets
+        packets = sniff(filter=filter_str, timeout=timeout, count=1)
+        
+        if not packets:
+            print(f"  No response received from {ip}:{port} within {timeout} seconds")
+            print(f"  Troubleshooting:")
+            print(f"    - Verify the target IP is correct and reachable (try ping {ip})")
+            print(f"    - Check if UDP port {port} is open (try 'nc -vzu {ip} {port}')")
+            print(f"    - Verify no firewall is blocking UDP traffic to port {port}")
+            print(f"    - Try increasing the timeout value")
+            return False, None
+            
+        # We got a packet, analyze it
+        response = packets[0]
+        print(f"  Received response from {ip}")
+        if DEBUG:
+            print(f"DEBUG: Response summary: {response.summary()}")
+            print(f"DEBUG: Response layers: {[layer.name for layer in response.layers()]}")
+        
+        if UDP in response and response[UDP].dport == sport:
+            if GENEVE in response:
+                print(f"  Geneve protocol detected on {ip}:{port}")
+                if DEBUG:
+                    geneve_resp = response[GENEVE]
+                    print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
+                    print(f"DEBUG: Geneve version: {geneve_resp.ver}")
+                return True, response
+            else:
+                print(f"  Response received from {ip}:{port}, but not Geneve protocol")
+                print(f"  Troubleshooting: The device at {ip}:{port} is responding on UDP but not with Geneve protocol")
+                print(f"  Possible causes:")
+                print(f"    - The device is not running Geneve")
+                print(f"    - The device is using a different VNI")
+                print(f"    - The device requires authentication or specific headers")
+                if DEBUG:
+                    print(f"DEBUG: Response payload: {response.summary()}")
+        else:
+            print(f"  Response received but not directed to our source port")
+            print(f"  Troubleshooting: Check firewall rules and NAT configurations")
+            
+        return False, response
+    except Exception as e:
+        print(f"  Error sniffing for Geneve packets: {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return False, None
+
 # Test if a remote device is running Geneve on UDP port
 def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10) -> bool:
     """
@@ -69,70 +189,17 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
         print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
         print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
         return check_udp_connectivity_netcat(ip, port, timeout)
-        
-    try:
-        # Create a Geneve packet
-        # VNI (Virtual Network Identifier) is a 24-bit value
-        vni = 3762  # Example VNI
-        sport = 12345  # Source port
-        
-        # Craft the packet
-        pkt = IP(src=source_ip, dst=ip)/UDP(sport=sport, dport=port)/GENEVE(vni=vni)/Raw(load="Geneve probe")
-        
-        print(f"  Sending Geneve probe from {source_ip} to {ip}:{port} (VNI: {vni})")
-        if DEBUG:
-            print(f"DEBUG: Packet details: {pkt.summary()}")
-            print(f"DEBUG: Packet layers: {[layer.name for layer in pkt.layers()]}")
-            
-        # Send the packet and wait for response
-        response = sr1(pkt, timeout=timeout, verbose=0)
-        
-        # Analyze the response
-        if response:
-            print(f"  Received response from {ip}:{port}")
-            if DEBUG:
-                print(f"DEBUG: Response summary: {response.summary()}")
-                print(f"DEBUG: Response layers: {[layer.name for layer in response.layers()]}")
-            
-            if UDP in response and response[UDP].dport == sport:
-                if GENEVE in response:
-                    print(f"  Geneve protocol detected on {ip}:{port}")
-                    if DEBUG:
-                        geneve_resp = response[GENEVE]
-                        print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
-                        print(f"DEBUG: Geneve version: {geneve_resp.ver}")
-                    return True
-                else:
-                    print(f"  Response received from {ip}:{port}, but not Geneve protocol")
-                    print(f"  Troubleshooting: The device at {ip}:{port} is responding on UDP but not with Geneve protocol")
-                    print(f"  Possible causes:")
-                    print(f"    - The device is not running Geneve")
-                    print(f"    - The device is using a different VNI (tried: {vni})")
-                    print(f"    - The device requires authentication or specific headers")
-                    if DEBUG:
-                        print(f"DEBUG: Response payload: {response.summary()}")
-            else:
-                print(f"  Response received but not directed to our source port")
-                print(f"  Troubleshooting: Check firewall rules and NAT configurations")
-        else:
-            print(f"  No response received from {ip}:{port} within {timeout} seconds")
-            print(f"  Troubleshooting:")
-            print(f"    - Verify the target IP is correct and reachable (try ping {ip})")
-            print(f"    - Check if UDP port {port} is open (try 'nc -vzu {ip} {port}')")
-            print(f"    - Verify no firewall is blocking UDP traffic to port {port}")
-            print(f"    - Try increasing the timeout value")
-            
+    
+    # First send the packet
+    send_success, pkt = send_geneve_packet(ip, source_ip, port)
+    if not send_success:
         return False
-    except Exception as e:
-        print(f"  Error testing Geneve: {e}")
-        print(f"  Troubleshooting:")
-        print(f"    - Check network connectivity to {ip}")
-        print(f"    - Verify source IP {source_ip} is correctly configured on your interface")
-        print(f"    - Check if you have permission to send raw packets (run as root/sudo)")
-        if DEBUG:
-            import traceback
-            traceback.print_exc()
-        return False
+    
+    # Then sniff for a response
+    sniff_success, response = sniff_geneve_packet(ip, source_ip, port, timeout)
+    
+    # Return True if we detected Geneve
+    return sniff_success
 
 # Check UDP connectivity using netcat
 def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
@@ -1258,13 +1325,27 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             guest_success = True
             print(f"UDP connectivity to {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
             
-            # If basic UDP connectivity succeeds, try Geneve test
+            # If basic UDP connectivity succeeds, try Geneve test with separate send and sniff
             print(f"Testing Geneve protocol on {ip}:{UDP_PORT}...")
-            if test_geneve_with_scapy(ip, ip_addr, UDP_PORT):
-                geneve_success = True
-                print(f"Geneve protocol on {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+            
+            # First send a Geneve packet
+            print(f"Step 1: Sending Geneve packet to {ip}:{UDP_PORT}...")
+            send_success, pkt = send_geneve_packet(ip, ip_addr, UDP_PORT)
+            
+            if send_success:
+                print(f"Successfully sent Geneve packet to {ip}:{UDP_PORT}")
+                
+                # Then sniff for a response
+                print(f"Step 2: Sniffing for Geneve response from {ip}:{UDP_PORT}...")
+                sniff_success, response = sniff_geneve_packet(ip, ip_addr, UDP_PORT)
+                
+                if sniff_success:
+                    geneve_success = True
+                    print(f"Geneve protocol on {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+                else:
+                    print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (No valid Geneve response received)")
             else:
-                print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET}")
+                print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (Failed to send Geneve packet)")
             
             break
         else:
