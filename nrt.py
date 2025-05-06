@@ -1195,10 +1195,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             test_results.append((f'Custom NTP {ntp} from {mgmt1_ip}', result))
 
     # HTTPS and SSL Certificate tests
-    print(f'=== HTTPS and SSL Certificate tests ===')
+    print(f'\n=== HTTPS and SSL Certificate tests ===')
     
     # Test HTTPS connectivity and SSL certificates for Nile Cloud from main interface
-    print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
+    print(f'Testing HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
     parsed = urlparse(f'https://{NILE_HOSTNAME}')
     host, port = parsed.hostname, parsed.port or 443
     try:
