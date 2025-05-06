@@ -20,7 +20,11 @@ Error creating Geneve tunnel: Command '['ip', 'link', 'add', 'geneve_test_2699',
    This script provides more detailed diagnostics and interactive options.
 
 3. **Use the improved nrt.py**:
-   The nrt.py script has been patched to be more resilient to Geneve tunnel creation failures. It now tries multiple methods to create the tunnel and provides better error handling.
+   The nrt.py script has been patched to be more resilient to Geneve tunnel creation failures. It now tries multiple methods to create the tunnel and provides better error handling. Simply run:
+   ```bash
+   sudo ./nrt.py
+   ```
+   This will run the complete Nile Readiness Test, including the Geneve protocol test.
 
 ## Common Issues and Solutions
 

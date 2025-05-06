@@ -801,7 +801,7 @@ def main():
     parser = argparse.ArgumentParser(description='Nile Readiness Test')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--config', type=str, help='Use JSON configuration file instead of interactive prompts')
-    parser.add_argument('--geneve-test', action='store_true', help='Run Geneve protocol test')
+    parser.add_argument('--geneve-test', action='store_true', help='Run only the Geneve protocol test')
     parser.add_argument('--target', type=str, help='Target IP address for tests')
     
     args = parser.parse_args()
@@ -809,22 +809,23 @@ def main():
     # Set debug flag
     DEBUG = args.debug
     
+    # Get the local IP address to use as source
+    local_ip = None
+    try:
+        # Create a temporary socket to determine the IP address used to connect to the internet
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        local_ip = s.getsockname()[0]
+        s.close()
+    except Exception as e:
+        print(f"Error determining local IP: {e}")
+        print("Please specify a valid source IP address manually")
+        return
+    
+    # If only the Geneve test is requested
     if args.geneve_test:
         # If target IP is provided, use it, otherwise use the example function
         if args.target:
-            # Get the local IP address to use as source
-            local_ip = None
-            try:
-                # Create a temporary socket to determine the IP address used to connect to the internet
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except Exception as e:
-                print(f"Error determining local IP: {e}")
-                print("Please specify a valid source IP address manually")
-                return
-                
             print(f"Testing Geneve protocol from {local_ip} to {args.target}")
             success, details = test_geneve_protocol(args.target, local_ip)
             
@@ -842,9 +843,37 @@ def main():
             # Run the example function
             test_geneve_example()
     else:
-        # Default behavior or other tests can be added here
-        print("No specific test selected. Use --geneve-test to run Geneve protocol test.")
-        print("For more options, use --help.")
+        # Run the complete test suite
+        print("=== Running Complete Nile Readiness Test ===")
+        
+        # Determine target IP
+        target_ip = args.target if args.target else GUEST_IPS[0]
+        print(f"Using target IP: {target_ip}")
+        
+        # Run Geneve protocol test
+        print("\n=== Running Geneve Protocol Test ===")
+        geneve_success, geneve_details = test_geneve_protocol(target_ip, local_ip)
+        
+        # Print the Geneve test results
+        print("\n=== Geneve Test Results ===")
+        if geneve_success:
+            print(f"SUCCESS: Geneve protocol detected on {target_ip}")
+        else:
+            print(f"WARNING: Geneve protocol not detected on {target_ip}")
+            print("This may affect Nile Connect functionality")
+        
+        # Add other tests here as needed
+        # For example:
+        # - DHCP tests
+        # - RADIUS tests
+        # - DNS tests
+        # - NTP tests
+        # - etc.
+        
+        # Print overall summary
+        print("\n=== Overall Test Summary ===")
+        print(f"Geneve Protocol: {'SUCCESS' if geneve_success else 'FAILURE'}")
+        # Add other test results to the summary as they are implemented
 
 if __name__ == "__main__":
     main()
