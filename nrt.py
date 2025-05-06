@@ -776,7 +776,8 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
             interface_up = True
             break
         else:
-            print(f"Attempt {attempt+1}/{max_retries}: Interface {iface} is not properly configured")
+            if DEBUG:
+                print(f"Attempt {attempt+1}/{max_retries}: Interface {iface} is not properly configured")
             if "state UP" not in iface_status:
                 if DEBUG:
                     print(f"  - Interface is not up, bringing it up...")
@@ -1532,23 +1533,29 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             print(f"Testing Geneve protocol on {ip}:{UDP_PORT}...")
             
             # First send a Geneve packet
-            print(f"Step 1: Sending Geneve packet to {ip}:{UDP_PORT}...")
+            if DEBUG:
+                print(f"Step 1: Sending Geneve packet to {ip}:{UDP_PORT}...")
             send_success, pkt = send_geneve_packet(ip, ip_addr, UDP_PORT)
             
             if send_success:
-                print(f"Successfully sent Geneve packet to {ip}:{UDP_PORT}")
+                if DEBUG:
+                    print(f"Successfully sent Geneve packet to {ip}:{UDP_PORT}")
                 
                 # Then sniff for a response - explicitly use the test interface
-                print(f"Step 2: Sniffing for Geneve response from {ip}:{UDP_PORT} on interface {iface}...")
+                if DEBUG:
+                    print(f"Step 2: Sniffing for Geneve response from {ip}:{UDP_PORT} on interface {iface}...")
                 sniff_success, response = sniff_geneve_packet(ip, ip_addr, UDP_PORT, timeout=10, sport=12345, iface=iface)
                 
                 if sniff_success:
                     geneve_success = True
-                    print(f"Geneve protocol on {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+                    if DEBUG:
+                        print(f"Geneve protocol on {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
                 else:
-                    print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (No valid Geneve response received)")
+                    if DEBUG:
+                        print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (No valid Geneve response received)")
             else:
-                print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (Failed to send Geneve packet)")
+                if DEBUG:
+                    print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET} (Failed to send Geneve packet)")
             
             break
         else:
