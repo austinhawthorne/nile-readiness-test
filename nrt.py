@@ -355,6 +355,17 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
         
         return False, "\n".join(test_details)
     
+    # Clean up any existing Geneve tunnels that might conflict
+    test_details.append("\n=== Cleaning Existing Geneve Tunnels ===")
+    print(f"  Checking for existing Geneve tunnels that might conflict...")
+    tunnels = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+    for line in tunnels.splitlines():
+        if "geneve" in line.lower():
+            tunnel_to_del = line.split(':')[1].strip()
+            test_details.append(f"Found existing tunnel: {tunnel_to_del}, attempting to delete")
+            print(f"  Found existing tunnel: {tunnel_to_del}, attempting to delete")
+            run_cmd(['ip', 'link', 'del', tunnel_to_del], check=False)
+    
     # Generate a unique tunnel name
     tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"
     test_details.append(f"\n=== Geneve Tunnel Creation ===")
@@ -363,90 +374,94 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
     try:
         print(f"  Creating Geneve tunnel {tunnel_name} from {source_ip} to {ip}:{port} (VNI: {vni})...")
         
-        # Create the Geneve tunnel with more detailed error handling
+        # Try multiple methods to create the tunnel
+        tunnel_created = False
+        error_messages = []
+        
+        # Method 1: Standard approach
         try:
             result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
                     'remote', ip, 'dstport', str(port)], check=True, capture_output=True)
             test_details.append("Tunnel creation command executed successfully")
+            tunnel_created = True
             if DEBUG:
                 test_details.append(f"Command output: {result.stdout}")
         except subprocess.CalledProcessError as e:
             error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            test_details.append(f"Error creating Geneve tunnel: {error_output}")
-            print(f"  Error creating Geneve tunnel: {e}")
+            error_messages.append(f"Standard method failed: {error_output}")
+            test_details.append(f"Standard method failed: {error_output}")
+            if DEBUG:
+                print(f"DEBUG: Standard tunnel creation failed: {error_output}")
+        
+        # Method 2: Try with explicit local address if first method failed
+        if not tunnel_created:
+            try:
+                print(f"  Trying with explicit local address...")
+                test_details.append("Trying with explicit local address...")
+                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"  # Generate a new name
+                result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
+                        'remote', ip, 'local', source_ip, 'dstport', str(port)], check=True, capture_output=True)
+                test_details.append("Tunnel creation with explicit local address succeeded")
+                tunnel_created = True
+                if DEBUG:
+                    test_details.append(f"Command output: {result.stdout}")
+            except subprocess.CalledProcessError as e:
+                error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
+                error_messages.append(f"Explicit local address method failed: {error_output}")
+                test_details.append(f"Explicit local address method failed: {error_output}")
+                if DEBUG:
+                    print(f"DEBUG: Tunnel creation with explicit local address failed: {error_output}")
+        
+        # Method 3: Try with a different VNI if previous methods failed
+        if not tunnel_created:
+            try:
+                print(f"  Trying with a different VNI...")
+                test_details.append("Trying with a different VNI...")
+                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"  # Generate a new name
+                new_vni = random.randint(1, 16777215)  # Max VNI value
+                result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(new_vni), 
+                        'remote', ip, 'dstport', str(port)], check=True, capture_output=True)
+                test_details.append(f"Tunnel creation with VNI {new_vni} succeeded")
+                tunnel_created = True
+                vni = new_vni  # Update VNI for later use
+                if DEBUG:
+                    test_details.append(f"Command output: {result.stdout}")
+            except subprocess.CalledProcessError as e:
+                error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
+                error_messages.append(f"Different VNI method failed: {error_output}")
+                test_details.append(f"Different VNI method failed: {error_output}")
+                if DEBUG:
+                    print(f"DEBUG: Tunnel creation with different VNI failed: {error_output}")
+        
+        # If all methods failed, report the errors and return
+        if not tunnel_created:
+            test_details.append("\n=== Tunnel Creation Failed ===")
+            test_details.append("All tunnel creation methods failed:")
+            for msg in error_messages:
+                test_details.append(f"  - {msg}")
             
-            if "file exists" in error_output.lower():
-                test_details.append("A tunnel with the same parameters already exists. Trying to clean up...")
-                print(f"  A tunnel with the same parameters already exists. Trying to clean up...")
-                # Try to find and delete existing tunnels
-                tunnels = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
-                test_details.append("Existing interfaces:")
-                for line in tunnels.splitlines():
-                    if "geneve" in line.lower():
-                        tunnel_to_del = line.split(':')[1].strip()
-                        test_details.append(f"Deleting existing tunnel: {tunnel_to_del}")
-                        print(f"  Deleting existing tunnel: {tunnel_to_del}")
-                        run_cmd(['ip', 'link', 'del', tunnel_to_del], check=False)
-                
-                # Try again with a different name
-                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"
-                test_details.append(f"Retrying with new tunnel name: {tunnel_name}")
-                print(f"  Retrying with new tunnel name: {tunnel_name}")
-                try:
-                    run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
-                            'remote', ip, 'dstport', str(port)], check=True)
-                    test_details.append("Second attempt at tunnel creation succeeded")
-                except subprocess.CalledProcessError as e2:
-                    error_output2 = e2.stderr.decode() if hasattr(e2, 'stderr') else str(e2)
-                    test_details.append(f"Second attempt also failed: {error_output2}")
-                    print(f"  Second attempt also failed: {e2}")
-                    return False, "\n".join(test_details)
-            elif "operation not supported" in error_output.lower():
-                test_details.append("Geneve tunnels are not supported by this kernel")
-                test_details.append("Troubleshooting:")
-                test_details.append("  - Your kernel may not have Geneve support compiled in")
-                test_details.append("  - Try loading the Geneve module with 'modprobe geneve'")
-                test_details.append("  - Falling back to Scapy-based Geneve test")
-                
-                print(f"  Geneve tunnels are not supported by this kernel")
-                print(f"  Troubleshooting:")
-                print(f"    - Your kernel may not have Geneve support compiled in")
-                print(f"    - Try loading the Geneve module with 'modprobe geneve'")
-                print(f"    - Falling back to Scapy-based Geneve test")
-                return False, "\n".join(test_details)
-            elif "permission denied" in error_output.lower():
-                test_details.append("Permission denied when creating Geneve tunnel")
-                test_details.append("Troubleshooting:")
-                test_details.append("  - Make sure you're running the script as root (sudo)")
-                test_details.append("  - Check if you have the necessary capabilities")
-                test_details.append("  - Falling back to Scapy-based Geneve test")
-                
-                print(f"  Permission denied when creating Geneve tunnel")
-                print(f"  Troubleshooting:")
-                print(f"    - Make sure you're running the script as root (sudo)")
-                print(f"    - Check if you have the necessary capabilities")
-                print(f"    - Falling back to Scapy-based Geneve test")
-                return False, "\n".join(test_details)
-            else:
-                test_details.append("Troubleshooting:")
-                test_details.append("  - Check if your kernel supports Geneve tunnels")
-                test_details.append("  - Verify you have permission to create network interfaces")
-                test_details.append("  - Check network connectivity to {ip}")
-                test_details.append("  - Falling back to Scapy-based Geneve test")
-                
-                print(f"  Troubleshooting:")
-                print(f"    - Check if your kernel supports Geneve tunnels")
-                print(f"    - Verify you have permission to create network interfaces")
-                print(f"    - Check network connectivity to {ip}")
-                print(f"    - Falling back to Scapy-based Geneve test")
-                return False, "\n".join(test_details)
+            test_details.append("\nTroubleshooting:")
+            test_details.append("  - Check if your kernel supports Geneve tunnels")
+            test_details.append("  - Verify you have permission to create network interfaces (run as root/sudo)")
+            test_details.append(f"  - Check network connectivity to {ip}")
+            test_details.append("  - Falling back to Scapy-based Geneve test")
+            
+            print(f"  All tunnel creation methods failed")
+            print(f"  Troubleshooting:")
+            print(f"    - Check if your kernel supports Geneve tunnels")
+            print(f"    - Verify you have permission to create network interfaces (run as root/sudo)")
+            print(f"    - Check network connectivity to {ip}")
+            print(f"    - Falling back to Scapy-based Geneve test")
+            return False, "\n".join(test_details)
         
         # Assign a test IP address to the tunnel
         test_ip = f"192.168.{random.randint(100, 200)}.{random.randint(2, 254)}/24"
         test_details.append(f"Assigning IP address {test_ip} to tunnel {tunnel_name}")
+        ip_assigned = False
         try:
             run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True, capture_output=True)
             test_details.append("Successfully assigned IP address to tunnel")
+            ip_assigned = True
         except subprocess.CalledProcessError as e:
             error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
             test_details.append(f"Error assigning IP to Geneve tunnel: {error_output}")
@@ -458,8 +473,21 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
             print(f"  Troubleshooting:")
             print(f"    - The IP address may already be in use")
             print(f"    - The tunnel interface may not exist")
-            # Try to continue anyway
-        
+            
+            # Try with a different IP range
+            if "file exists" in error_output.lower():
+                try:
+                    test_ip = f"192.168.{random.randint(1, 99)}.{random.randint(2, 254)}/24"
+                    print(f"  Trying with different IP: {test_ip}")
+                    test_details.append(f"Trying with different IP: {test_ip}")
+                    run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True, capture_output=True)
+                    test_details.append("Successfully assigned alternative IP address to tunnel")
+                    ip_assigned = True
+                except subprocess.CalledProcessError as e2:
+                    error_output2 = e2.stderr.decode() if hasattr(e2, 'stderr') else str(e2)
+                    test_details.append(f"Error assigning alternative IP: {error_output2}")
+                    print(f"  Error assigning alternative IP: {e2}")
+            
         # Bring the tunnel up
         test_details.append(f"Bringing up tunnel {tunnel_name}")
         try:
