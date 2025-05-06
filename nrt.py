@@ -33,51 +33,6 @@ from scapy.all import sniff, sr1, send, Raw
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
 
-try:
-    from scapy.contrib.geneve import GENEVE
-except ImportError:
-    print("Warning: Scapy Geneve module not available. Geneve testing will be limited.")
-    GENEVE = None
-
-# Global debug flag
-DEBUG = False
-
-# Run a command and return the result
-def run_cmd(cmd, check=False, capture_output=False, text=False, timeout=None):
-    """
-    Run a shell command and return the result
-    
-    Args:
-        cmd: Command to run (list of strings)
-        check: Whether to raise an exception if the command fails
-        capture_output: Whether to capture stdout and stderr
-        text: Whether to return stdout and stderr as strings
-        timeout: Timeout in seconds
-        
-    Returns:
-        subprocess.CompletedProcess: Result of the command
-    """
-    if DEBUG:
-        print(f"DEBUG: Running command: {' '.join(cmd)}")
-    
-    try:
-        result = subprocess.run(
-            cmd,
-            check=check,
-            capture_output=capture_output,
-            text=text,
-            timeout=timeout
-        )
-        return result
-    except subprocess.CalledProcessError as e:
-        if DEBUG:
-            print(f"DEBUG: Command failed with return code {e.returncode}")
-            if hasattr(e, 'stdout') and e.stdout:
-                print(f"DEBUG: stdout: {e.stdout}")
-            if hasattr(e, 'stderr') and e.stderr:
-                print(f"DEBUG: stderr: {e.stderr}")
-        raise
-
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
 import dhcppython.options as dhcp_options
@@ -91,626 +46,7 @@ UDP_PORT = 6081
 SSL_PORT = 443
 
 
-# Send a Geneve packet
-def send_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, vni: int = 3762, sport: int = 12345) -> tuple:
-    """
-    Send a Geneve packet to a target
-    
-    Args:
-        ip: Target IP address
-        source_ip: Source IP to use for the packet
-        port: UDP port to use (default: 6081)
-        vni: Virtual Network Identifier (default: 3762)
-        sport: Source port (default: 12345)
-        
-    Returns:
-        tuple: (success, packet) where success is a boolean indicating if the packet was sent successfully
-               and packet is the packet that was sent
-    """
-    if GENEVE is None:
-        print(f"  Warning: Scapy Geneve module not available.")
-        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
-        return False, None
-        
-    try:
-        # Craft the packet
-        pkt = IP(src=source_ip, dst=ip)/UDP(sport=sport, dport=port)/GENEVE(vni=vni)/Raw(load="Geneve probe")
-        
-        print(f"  Sending Geneve probe from {source_ip} to {ip}:{port} (VNI: {vni})")
-        if DEBUG:
-            print(f"DEBUG: Packet details: {pkt.summary()}")
-            print(f"DEBUG: Packet layers: {[layer.name for layer in pkt.layers()]}")
-            
-        # Send the packet
-        send(pkt, verbose=0)
-        return True, pkt
-    except Exception as e:
-        print(f"  Error sending Geneve packet: {e}")
-        print(f"  Troubleshooting:")
-        print(f"    - Check network connectivity to {ip}")
-        print(f"    - Verify source IP {source_ip} is correctly configured on your interface")
-        print(f"    - Check if you have permission to send raw packets (run as root/sudo)")
-        if DEBUG:
-            import traceback
-            traceback.print_exc()
-        return False, None
-
-# Sniff for Geneve packets
-def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10, sport: int = 12345, iface: str = None) -> tuple:
-    """
-    Sniff for Geneve packets from a specific source
-    
-    Args:
-        ip: Source IP address to filter for
-        source_ip: Our source IP (for filter construction)
-        port: UDP port to filter for (default: 6081)
-        timeout: Sniffing timeout in seconds (default: 10)
-        sport: Source port we used when sending (default: 12345)
-        iface: Interface to sniff on (default: None, which uses scapy's default)
-        
-    Returns:
-        tuple: (success, packet) where success is a boolean indicating if a Geneve packet was detected
-               and packet is the detected packet
-    """
-    if GENEVE is None:
-        print(f"  Warning: Scapy Geneve module not available.")
-        return False, None
-        
-    try:
-        # Create a filter for any packets from the target IP (no protocol or port filtering)
-        filter_str = f"src host {ip}"
-        
-        # Get the list of available interfaces
-        available_interfaces = conf.ifaces.keys()
-        if DEBUG:
-            print(f"DEBUG: Available interfaces: {', '.join(available_interfaces)}")
-        
-        # If no interface specified, try to determine the best one
-        if iface is None:
-            # Try to use the interface that has the source_ip
-            for i in conf.ifaces.values():
-                if hasattr(i, 'ip') and i.ip == source_ip:
-                    iface = i.name
-                    if DEBUG:
-                        print(f"DEBUG: Found interface {iface} with IP {source_ip}")
-                    break
-        
-        print(f"  Sniffing for Geneve responses from {ip} on interface {iface or 'default'} (timeout: {timeout}s)")
-        if DEBUG:
-            print(f"DEBUG: Using filter: {filter_str}")
-            
-        # Sniff for packets
-        try:
-            if iface:
-                packets = sniff(iface=iface, filter=filter_str, timeout=timeout, count=1)
-            else:
-                packets = sniff(filter=filter_str, timeout=timeout, count=1)
-        except OSError as ose:
-            if "Network is down" in str(ose):
-                print(f"  Error: Network is down on interface {iface or 'default'}")
-                print(f"  Troubleshooting:")
-                print(f"    - Check if the interface is up (ip link show)")
-                print(f"    - Try using a different interface")
-                print(f"    - Verify network connectivity")
-                return False, None
-            else:
-                raise
-        
-        if not packets:
-            print(f"  No response received from {ip}:{port} within {timeout} seconds")
-            print(f"  Troubleshooting:")
-            print(f"    - Check if UDP port {port} is open (try 'nc -vzu {ip} {port}')")
-            print(f"    - Verify no firewall is blocking UDP traffic to port {port}")
-            return False, None
-            
-        # We got a packet, analyze it
-        response = packets[0]
-        print(f"  Received response from {ip}")
-        if DEBUG:
-            print(f"DEBUG: Response summary: {response.summary()}")
-            print(f"DEBUG: Response layers: {[layer.name for layer in response.layers()]}")
-        
-        # Check if it's a Geneve packet
-        if GENEVE in response:
-            print(f"  Geneve protocol detected on {ip}")
-            if DEBUG:
-                geneve_resp = response[GENEVE]
-                print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
-                print(f"DEBUG: Geneve version: {geneve_resp.ver}")
-            return True, response
-        
-        # Check if it's a UDP packet
-        elif UDP in response:
-            if response[UDP].dport == sport:
-                print(f"  UDP response received from {ip}:{port}, but not Geneve protocol")
-                print(f"  Troubleshooting: The device at {ip} is responding on UDP but not with Geneve protocol")
-            else:
-                print(f"  UDP response received but not directed to our source port ({response[UDP].dport} instead of {sport})")
-                print(f"  Troubleshooting: Check firewall rules and NAT configurations")
-            if DEBUG:
-                print(f"DEBUG: UDP payload: {response[UDP].payload}")
-        
-        # It's some other type of packet
-        else:
-            print(f"  Non-UDP response received from {ip}")
-            print(f"  Response protocol: {response.summary()}")
-            print(f"  Troubleshooting: The device at {ip} is responding but not with UDP/Geneve")
-            
-        return False, response
-    except Exception as e:
-        print(f"  Error sniffing for Geneve packets: {e}")
-        print(f"  Troubleshooting:")
-        print(f"    - Check if the interface is up and has proper IP configuration")
-        print(f"    - Verify you have permission to sniff packets (run as root/sudo)")
-        print(f"    - Try using a different interface")
-        if DEBUG:
-            import traceback
-            traceback.print_exc()
-        return False, None
-
-# Check if kernel supports Geneve tunnels
-def check_geneve_kernel_support() -> tuple:
-    """
-    Check if the kernel supports Geneve tunnels and try to load the module if needed
-    
-    Returns:
-        tuple: (success, details) where success is a boolean indicating if Geneve tunnels are supported
-               and details is a string with information about the support status
-    """
-    details = []
-    
-    try:
-        # Check if the geneve module is loaded or built into the kernel
-        modules = run_cmd(['lsmod'], capture_output=True, text=True).stdout
-        if 'geneve' in modules:
-            details.append("Geneve module is already loaded")
-            if DEBUG:
-                print("DEBUG: Geneve module is loaded")
-            return True, "\n".join(details)
-        
-        # Try to load the geneve module if it's not already loaded
-        try:
-            details.append("Attempting to load Geneve module...")
-            result = run_cmd(['modprobe', 'geneve'], check=True, capture_output=True)
-            
-            # Check if module was loaded successfully
-            modules_after = run_cmd(['lsmod'], capture_output=True, text=True).stdout
-            if 'geneve' in modules_after:
-                details.append("Successfully loaded Geneve module")
-                if DEBUG:
-                    print("DEBUG: Successfully loaded geneve module")
-                return True, "\n".join(details)
-            else:
-                details.append("Module load command succeeded but module not found in lsmod")
-                if DEBUG:
-                    print("DEBUG: Module load command succeeded but module not found in lsmod")
-        except subprocess.CalledProcessError as e:
-            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            details.append(f"Failed to load Geneve module: {error_output}")
-            if DEBUG:
-                print(f"DEBUG: Failed to load geneve module: {error_output}")
-            # Continue with the test tunnel check
-        
-        # Check if we can create a dummy Geneve tunnel
-        details.append("Attempting to create a test Geneve tunnel...")
-        test_tunnel = "geneve_test_check"
-        try:
-            run_cmd(['ip', 'link', 'add', test_tunnel, 'type', 'geneve', 'id', '1', 
-                    'remote', '127.0.0.1', 'dstport', '6081'], check=True, capture_output=True)
-            # If we get here, the command succeeded
-            details.append("Successfully created test Geneve tunnel")
-            run_cmd(['ip', 'link', 'del', test_tunnel], check=False, capture_output=True)
-            if DEBUG:
-                print("DEBUG: Successfully created test Geneve tunnel")
-            return True, "\n".join(details)
-        except subprocess.CalledProcessError as e:
-            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            details.append(f"Failed to create test Geneve tunnel: {error_output}")
-            if DEBUG:
-                print(f"DEBUG: Failed to create test Geneve tunnel: {error_output}")
-            return False, "\n".join(details)
-    except Exception as e:
-        details.append(f"Error checking Geneve support: {e}")
-        if DEBUG:
-            print(f"DEBUG: Error checking Geneve support: {e}")
-        return False, "\n".join(details)
-
-# Test Geneve by creating an actual tunnel
-def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: int = 3762) -> tuple:
-    """
-    Test Geneve by creating an actual tunnel interface and testing connectivity
-    
-    Args:
-        ip: Target IP address to test
-        source_ip: Source IP to use for the tunnel
-        port: UDP port to use (default: 6081)
-        vni: Virtual Network Identifier (default: 3762)
-        
-    Returns:
-        tuple: (success, details) where success is a boolean indicating if Geneve tunnel was created and is functional
-               and details is a string with information about the test results
-    """
-    test_details = []
-    
-    # First check if the kernel supports Geneve tunnels
-    geneve_supported, support_details = check_geneve_kernel_support()
-    test_details.append("=== Geneve Kernel Support Check ===")
-    test_details.append(support_details)
-    
-    if not geneve_supported:
-        test_details.append("\n=== Geneve Support Error ===")
-        test_details.append("Error: Kernel does not support Geneve tunnels")
-        test_details.append("Troubleshooting:")
-        test_details.append("  - Check if the Geneve kernel module is available")
-        test_details.append("  - Try loading the module with 'modprobe geneve'")
-        test_details.append("  - You may need to install a newer kernel or compile with Geneve support")
-        test_details.append("  - Falling back to Scapy-based Geneve test")
-        
-        print(f"  Error: Kernel does not support Geneve tunnels")
-        print(f"  Troubleshooting:")
-        print(f"    - Check if the Geneve kernel module is available")
-        print(f"    - Try loading the module with 'modprobe geneve'")
-        print(f"    - You may need to install a newer kernel or compile with Geneve support")
-        print(f"    - Falling back to Scapy-based Geneve test")
-        
-        return False, "\n".join(test_details)
-    
-    # Clean up any existing Geneve tunnels that might conflict
-    test_details.append("\n=== Cleaning Existing Geneve Tunnels ===")
-    print(f"  Checking for existing Geneve tunnels that might conflict...")
-    tunnels = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
-    for line in tunnels.splitlines():
-        if "geneve" in line.lower():
-            tunnel_to_del = line.split(':')[1].strip()
-            test_details.append(f"Found existing tunnel: {tunnel_to_del}, attempting to delete")
-            print(f"  Found existing tunnel: {tunnel_to_del}, attempting to delete")
-            run_cmd(['ip', 'link', 'del', tunnel_to_del], check=False)
-    
-    # Generate a unique tunnel name
-    tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"
-    test_details.append(f"\n=== Geneve Tunnel Creation ===")
-    test_details.append(f"Creating Geneve tunnel {tunnel_name} from {source_ip} to {ip}:{port} (VNI: {vni})...")
-    
-    try:
-        print(f"  Creating Geneve tunnel {tunnel_name} from {source_ip} to {ip}:{port} (VNI: {vni})...")
-        
-        # Try multiple methods to create the tunnel
-        tunnel_created = False
-        error_messages = []
-        
-        # Method 1: Standard approach
-        try:
-            result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
-                    'remote', ip, 'dstport', str(port)], check=True, capture_output=True)
-            test_details.append("Tunnel creation command executed successfully")
-            tunnel_created = True
-            if DEBUG:
-                test_details.append(f"Command output: {result.stdout}")
-        except subprocess.CalledProcessError as e:
-            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            error_messages.append(f"Standard method failed: {error_output}")
-            test_details.append(f"Standard method failed: {error_output}")
-            if DEBUG:
-                print(f"DEBUG: Standard tunnel creation failed: {error_output}")
-        
-        # Method 2: Try with explicit local address if first method failed
-        if not tunnel_created:
-            try:
-                print(f"  Trying with explicit local address...")
-                test_details.append("Trying with explicit local address...")
-                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"  # Generate a new name
-                result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
-                        'remote', ip, 'local', source_ip, 'dstport', str(port)], check=True, capture_output=True)
-                test_details.append("Tunnel creation with explicit local address succeeded")
-                tunnel_created = True
-                if DEBUG:
-                    test_details.append(f"Command output: {result.stdout}")
-            except subprocess.CalledProcessError as e:
-                error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-                error_messages.append(f"Explicit local address method failed: {error_output}")
-                test_details.append(f"Explicit local address method failed: {error_output}")
-                if DEBUG:
-                    print(f"DEBUG: Tunnel creation with explicit local address failed: {error_output}")
-        
-        # Method 3: Try with a different VNI if previous methods failed
-        if not tunnel_created:
-            try:
-                print(f"  Trying with a different VNI...")
-                test_details.append("Trying with a different VNI...")
-                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"  # Generate a new name
-                new_vni = random.randint(1, 16777215)  # Max VNI value
-                result = run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(new_vni), 
-                        'remote', ip, 'dstport', str(port)], check=True, capture_output=True)
-                test_details.append(f"Tunnel creation with VNI {new_vni} succeeded")
-                tunnel_created = True
-                vni = new_vni  # Update VNI for later use
-                if DEBUG:
-                    test_details.append(f"Command output: {result.stdout}")
-            except subprocess.CalledProcessError as e:
-                error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-                error_messages.append(f"Different VNI method failed: {error_output}")
-                test_details.append(f"Different VNI method failed: {error_output}")
-                if DEBUG:
-                    print(f"DEBUG: Tunnel creation with different VNI failed: {error_output}")
-        
-        # If all methods failed, report the errors and return
-        if not tunnel_created:
-            test_details.append("\n=== Tunnel Creation Failed ===")
-            test_details.append("All tunnel creation methods failed:")
-            for msg in error_messages:
-                test_details.append(f"  - {msg}")
-            
-            test_details.append("\nTroubleshooting:")
-            test_details.append("  - Check if your kernel supports Geneve tunnels")
-            test_details.append("  - Verify you have permission to create network interfaces (run as root/sudo)")
-            test_details.append(f"  - Check network connectivity to {ip}")
-            test_details.append("  - Falling back to Scapy-based Geneve test")
-            
-            print(f"  All tunnel creation methods failed")
-            print(f"  Troubleshooting:")
-            print(f"    - Check if your kernel supports Geneve tunnels")
-            print(f"    - Verify you have permission to create network interfaces (run as root/sudo)")
-            print(f"    - Check network connectivity to {ip}")
-            print(f"    - Falling back to Scapy-based Geneve test")
-            return False, "\n".join(test_details)
-        
-        # Assign a test IP address to the tunnel
-        test_ip = f"192.168.{random.randint(100, 200)}.{random.randint(2, 254)}/24"
-        test_details.append(f"Assigning IP address {test_ip} to tunnel {tunnel_name}")
-        ip_assigned = False
-        try:
-            run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True, capture_output=True)
-            test_details.append("Successfully assigned IP address to tunnel")
-            ip_assigned = True
-        except subprocess.CalledProcessError as e:
-            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            test_details.append(f"Error assigning IP to Geneve tunnel: {error_output}")
-            test_details.append("Troubleshooting:")
-            test_details.append("  - The IP address may already be in use")
-            test_details.append("  - The tunnel interface may not exist")
-            
-            print(f"  Error assigning IP to Geneve tunnel: {e}")
-            print(f"  Troubleshooting:")
-            print(f"    - The IP address may already be in use")
-            print(f"    - The tunnel interface may not exist")
-            
-            # Try with a different IP range
-            if "file exists" in error_output.lower():
-                try:
-                    test_ip = f"192.168.{random.randint(1, 99)}.{random.randint(2, 254)}/24"
-                    print(f"  Trying with different IP: {test_ip}")
-                    test_details.append(f"Trying with different IP: {test_ip}")
-                    run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True, capture_output=True)
-                    test_details.append("Successfully assigned alternative IP address to tunnel")
-                    ip_assigned = True
-                except subprocess.CalledProcessError as e2:
-                    error_output2 = e2.stderr.decode() if hasattr(e2, 'stderr') else str(e2)
-                    test_details.append(f"Error assigning alternative IP: {error_output2}")
-                    print(f"  Error assigning alternative IP: {e2}")
-            
-        # Bring the tunnel up
-        test_details.append(f"Bringing up tunnel {tunnel_name}")
-        try:
-            run_cmd(['ip', 'link', 'set', 'dev', tunnel_name, 'up'], check=True, capture_output=True)
-            test_details.append("Successfully brought up Geneve tunnel")
-            print(f"  Geneve tunnel {tunnel_name} created and up")
-        except subprocess.CalledProcessError as e:
-            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
-            test_details.append(f"Error bringing up Geneve tunnel: {error_output}")
-            test_details.append("Troubleshooting:")
-            test_details.append("  - The tunnel interface may not exist")
-            test_details.append("  - There may be network configuration issues")
-            
-            print(f"  Error bringing up Geneve tunnel: {e}")
-            print(f"  Troubleshooting:")
-            print(f"    - The tunnel interface may not exist")
-            print(f"    - There may be network configuration issues")
-            # Clean up and return False
-            run_cmd(['ip', 'link', 'del', tunnel_name], check=False, capture_output=True)
-            return False, "\n".join(test_details)
-        
-        # Check if the tunnel interface is actually up
-        test_details.append("Checking tunnel interface status")
-        iface_status = run_cmd(['ip', 'link', 'show', 'dev', tunnel_name], 
-                               capture_output=True, text=True).stdout
-        test_details.append(f"Interface status: {iface_status.strip()}")
-        
-        if "state UP" in iface_status:
-            test_details.append("Geneve tunnel is in UP state")
-            print(f"  Geneve tunnel {tunnel_name} is UP")
-            
-            # Get detailed tunnel information
-            tunnel_info = run_cmd(['ip', '-d', 'link', 'show', 'dev', tunnel_name], 
-                                 capture_output=True, text=True).stdout
-            test_details.append("\nDetailed tunnel information:")
-            test_details.append(tunnel_info.strip())
-            
-            # Try to ping through the tunnel (this will likely fail but shows the tunnel is working)
-            # We're not actually expecting a response, just checking if the packet can be sent
-            test_details.append(f"\nAttempting to ping {ip} through tunnel {tunnel_name}")
-            try:
-                ping_result = run_cmd(['ping', '-c', '1', '-W', '1', '-I', tunnel_name, ip], 
-                                    capture_output=True, text=True)
-                test_details.append("Ping command executed")
-                test_details.append(f"Ping stdout: {ping_result.stdout}")
-                test_details.append(f"Ping stderr: {ping_result.stderr}")
-                test_details.append(f"Ping return code: {ping_result.returncode}")
-                
-                # Even if ping fails, the tunnel was created successfully
-                test_details.append("Geneve protocol detected on target")
-                print(f"  Geneve protocol detected on {ip}:{port}")
-                return True, "\n".join(test_details)
-            except Exception as e:
-                # Even if ping fails with an exception, the tunnel was created successfully
-                test_details.append(f"Ping through tunnel failed: {e}")
-                test_details.append("This is expected and doesn't indicate a problem")
-                test_details.append("Geneve protocol detected on target")
-                
-                print(f"  Ping through tunnel failed: {e}")
-                print(f"  This is expected and doesn't indicate a problem")
-                print(f"  Geneve protocol detected on {ip}:{port}")
-                return True, "\n".join(test_details)
-        else:
-            test_details.append("Geneve tunnel failed to come up")
-            test_details.append(f"Troubleshooting: The device at {ip}:{port} may not support Geneve")
-            
-            print(f"  Geneve tunnel {tunnel_name} failed to come up")
-            print(f"  Troubleshooting: The device at {ip}:{port} may not support Geneve")
-            return False, "\n".join(test_details)
-            
-    except Exception as e:
-        test_details.append(f"Error in Geneve tunnel test: {e}")
-        test_details.append("Troubleshooting:")
-        test_details.append("  - Check if your kernel supports Geneve tunnels")
-        test_details.append("  - Verify you have permission to create network interfaces (run as root/sudo)")
-        test_details.append("  - Check network connectivity to {ip}")
-        
-        print(f"  Error in Geneve tunnel test: {e}")
-        print(f"  Troubleshooting:")
-        print(f"    - Check if your kernel supports Geneve tunnels")
-        print(f"    - Verify you have permission to create network interfaces (run as root/sudo)")
-        print(f"    - Check network connectivity to {ip}")
-        if DEBUG:
-            import traceback
-            traceback.print_exc()
-            test_details.append("Traceback:")
-            test_details.append(traceback.format_exc())
-        return False, "\n".join(test_details)
-    finally:
-        # Clean up the tunnel interface
-        try:
-            test_details.append(f"Cleaning up Geneve tunnel {tunnel_name}...")
-            print(f"  Cleaning up Geneve tunnel {tunnel_name}...")
-            run_cmd(['ip', 'link', 'del', tunnel_name], check=False, capture_output=True)
-            test_details.append("Tunnel cleanup completed")
-        except Exception as e:
-            test_details.append(f"Error cleaning up tunnel: {e}")
-            if DEBUG:
-                print(f"DEBUG: Error cleaning up tunnel: {e}")
-
-# Test if a remote device is running Geneve on UDP port
-def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10) -> tuple:
-    """
-    Test if a target is running Geneve on UDP port (default 6081) using Scapy
-    
-    Args:
-        ip: Target IP address to test
-        source_ip: Source IP to use for the packet
-        port: UDP port to test (default: 6081)
-        timeout: Response timeout in seconds (default: 10)
-        
-    Returns:
-        tuple: (success, details) where success is a boolean indicating if Geneve is detected
-               and details is a string with information about the test results
-    """
-    test_details = []
-    
-    if GENEVE is None:
-        test_details.append("Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
-        print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
-        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
-        
-        # Try basic UDP connectivity
-        udp_success = check_udp_connectivity_netcat(ip, port, timeout)
-        if udp_success:
-            test_details.append(f"UDP port {port} is open on {ip}, but Geneve protocol cannot be verified")
-            return udp_success, "\n".join(test_details)
-        else:
-            test_details.append(f"UDP port {port} is not open on {ip}")
-            return False, "\n".join(test_details)
-    
-    # Get the interface name from the IP address
-    iface_name = None
-    for i in conf.ifaces.values():
-        if hasattr(i, 'ip') and i.ip == source_ip:
-            iface_name = i.name
-            test_details.append(f"Using interface {iface_name} with IP {source_ip}")
-            if DEBUG:
-                print(f"DEBUG: Found interface {iface_name} with IP {source_ip}")
-            break
-    
-    # First send the packet
-    test_details.append("\n=== Sending Geneve Packet ===")
-    send_success, pkt = send_geneve_packet(ip, source_ip, port)
-    if not send_success:
-        test_details.append("Failed to send Geneve packet")
-        return False, "\n".join(test_details)
-    
-    # Then sniff for a response - explicitly pass the interface
-    test_details.append("\n=== Sniffing for Response ===")
-    sniff_success, response = sniff_geneve_packet(ip, source_ip, port, timeout, sport=12345, iface=iface_name)
-    
-    if sniff_success:
-        test_details.append("Geneve protocol detected on target")
-        if DEBUG and response:
-            test_details.append(f"Response summary: {response.summary()}")
-    else:
-        test_details.append("No Geneve response detected")
-        if response:
-            test_details.append(f"Received non-Geneve response: {response.summary()}")
-    
-    # Return results
-    return sniff_success, "\n".join(test_details)
-
-# Test Geneve protocol support
-def test_geneve_protocol(ip: str, source_ip: str, port: int = UDP_PORT) -> tuple:
-    """
-    Test if a target is running Geneve on UDP port (default 6081)
-    
-    Args:
-        ip: Target IP address to test
-        source_ip: Source IP to use for the packet
-        port: UDP port to test (default: 6081)
-        
-    Returns:
-        tuple: (success, details) where success is a boolean indicating if Geneve is detected
-               and details is a string with information about the test results
-    """
-    test_details = []
-    print(f"Testing Geneve protocol support on {ip}:{port}...")
-    test_details.append(f"Testing Geneve protocol support on {ip}:{port}")
-    
-    # First try with tunnel creation method
-    test_details.append("\n=== Testing with Geneve Tunnel Creation ===")
-    print(f"  Attempting to test with Geneve tunnel creation...")
-    tunnel_success, tunnel_details = test_geneve_with_tunnel(ip, source_ip, port)
-    test_details.append(tunnel_details)
-    
-    if tunnel_success:
-        print(f"  Geneve tunnel test successful")
-        return True, "\n".join(test_details)
-    
-    # If tunnel method fails, try with Scapy
-    test_details.append("\n=== Testing with Scapy Packet Method ===")
-    print(f"  Attempting to test with Scapy packet method...")
-    scapy_success, scapy_details = test_geneve_with_scapy(ip, source_ip, port)
-    test_details.append(scapy_details)
-    
-    if scapy_success:
-        print(f"  Scapy Geneve test successful")
-        return True, "\n".join(test_details)
-    
-    # If both methods fail, try basic UDP connectivity
-    test_details.append("\n=== Testing Basic UDP Connectivity ===")
-    print(f"  Attempting to test basic UDP connectivity...")
-    udp_success = check_udp_connectivity_netcat(ip, port)
-    
-    if udp_success:
-        test_details.append(f"UDP port {port} is open on {ip}, but Geneve protocol not detected")
-        print(f"  UDP port {port} is open on {ip}, but Geneve protocol not detected")
-        print(f"  Troubleshooting:")
-        print(f"    - The device at {ip} may not support Geneve protocol")
-        print(f"    - The device may be using a different UDP port for Geneve")
-        print(f"    - There may be a firewall blocking Geneve packets")
-        return False, "\n".join(test_details)
-    else:
-        test_details.append(f"UDP port {port} is not open on {ip}")
-        print(f"  UDP port {port} is not open on {ip}")
-        print(f"  Troubleshooting:")
-        print(f"    - Check if the device at {ip} is running")
-        print(f"    - Verify there is no firewall blocking UDP traffic to port {port}")
-        print(f"    - The device may not support Geneve protocol")
-        return False, "\n".join(test_details)
+# Check UDP connectivity using netcat
 
 # Check UDP connectivity using netcat
 def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
@@ -750,130 +86,1355 @@ def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 
         print(f"  Error: {e}")
         return False
 
-# Example function to demonstrate Geneve testing
-def test_geneve_example():
+# Check SSL certificate
+def check_ssl_certificate(ip: str, hostname: str, expected_org: str) -> bool:
     """
-    Example function that demonstrates how to use the Geneve testing functionality.
-    This can be called from the main function or command line to test Geneve support
-    on a specific target.
-    """
-    print("=== Geneve Protocol Testing Example ===")
+    Test SSL certificate validity and organization.
     
-    # Get the local IP address to use as source
-    local_ip = None
+    Args:
+        ip: IP address to check
+        hostname: Hostname for SNI
+        expected_org: Expected organization in certificate issuer
+        
+    Returns:
+        bool: True if SSL certificate is valid and contains expected organization, False otherwise
+    """
     try:
-        # Create a temporary socket to determine the IP address used to connect to the internet
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
+        result = subprocess.run(
+            ['openssl', 's_client', '-connect', f'{ip}:{SSL_PORT}', '-servername', hostname],
+            capture_output=True,
+            text=True
+        )
+        
+        if "issuer=" in result.stdout:
+            issuer_start = result.stdout.find("issuer=")
+            issuer_end = result.stdout.find("\n", issuer_start)
+            issuer = result.stdout[issuer_start:issuer_end].strip()
+            
+            # Check if issuer contains the expected organization
+            if expected_org not in issuer:
+                return False
+                
+            return True
+        else:
+            return False
     except Exception as e:
-        print(f"Error determining local IP: {e}")
-        print("Please specify a valid source IP address manually")
-        return
-    
-    # Target IP to test (example: a Nile Connect IP)
-    target_ip = GUEST_IPS[0]  # Using the first IP from the GUEST_IPS list
-    
-    print(f"Testing Geneve protocol from {local_ip} to {target_ip}")
-    
-    # Run the Geneve protocol test
-    success, details = test_geneve_protocol(target_ip, local_ip)
-    
-    # Print the detailed results
-    print("\n=== Detailed Test Results ===")
-    print(details)
-    
-    # Print the summary
-    print("\n=== Test Summary ===")
-    if success:
-        print(f"SUCCESS: Geneve protocol detected on {target_ip}")
-    else:
-        print(f"FAILURE: Geneve protocol not detected on {target_ip}")
+        print(f"  Error: {e}")
+        return False
 
-def main():
-    """
-    Main function to parse command line arguments and run the appropriate tests.
-    """
-    global DEBUG
-    
-    # Parse command line arguments
+
+
+# Parse command line arguments
+def parse_args():
     parser = argparse.ArgumentParser(description='Nile Readiness Test')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
-    parser.add_argument('--config', type=str, help='Use JSON configuration file instead of interactive prompts')
-    parser.add_argument('--geneve-test', action='store_true', help='Run only the Geneve protocol test')
-    parser.add_argument('--target', type=str, help='Target IP address for tests')
-    
-    args = parser.parse_args()
-    
-    # Set debug flag
-    DEBUG = args.debug
-    
-    # Get the local IP address to use as source
-    local_ip = None
-    try:
-        # Create a temporary socket to determine the IP address used to connect to the internet
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        local_ip = s.getsockname()[0]
-        s.close()
-    except Exception as e:
-        print(f"Error determining local IP: {e}")
-        print("Please specify a valid source IP address manually")
-        return
-    
-    # If only the Geneve test is requested
-    if args.geneve_test:
-        # If target IP is provided, use it, otherwise use the example function
-        if args.target:
-            print(f"Testing Geneve protocol from {local_ip} to {args.target}")
-            success, details = test_geneve_protocol(args.target, local_ip)
-            
-            # Print the detailed results
-            print("\n=== Detailed Test Results ===")
-            print(details)
-            
-            # Print the summary
-            print("\n=== Test Summary ===")
-            if success:
-                print(f"SUCCESS: Geneve protocol detected on {args.target}")
-            else:
-                print(f"FAILURE: Geneve protocol not detected on {args.target}")
-        else:
-            # Run the example function
-            test_geneve_example()
-    else:
-        # Run the complete test suite
-        print("=== Running Complete Nile Readiness Test ===")
-        
-        # Determine target IP
-        target_ip = args.target if args.target else GUEST_IPS[0]
-        print(f"Using target IP: {target_ip}")
-        
-        # Run Geneve protocol test
-        print("\n=== Running Geneve Protocol Test ===")
-        geneve_success, geneve_details = test_geneve_protocol(target_ip, local_ip)
-        
-        # Print the Geneve test results
-        print("\n=== Geneve Test Results ===")
-        if geneve_success:
-            print(f"SUCCESS: Geneve protocol detected on {target_ip}")
-        else:
-            print(f"WARNING: Geneve protocol not detected on {target_ip}")
-            print("This may affect Nile Connect functionality")
-        
-        # Add other tests here as needed
-        # For example:
-        # - DHCP tests
-        # - RADIUS tests
-        # - DNS tests
-        # - NTP tests
-        # - etc.
-        
-        # Print overall summary
-        print("\n=== Overall Test Summary ===")
-        print(f"Geneve Protocol: {'SUCCESS' if geneve_success else 'FAILURE'}")
-        # Add other test results to the summary as they are implemented
+    parser.add_argument('--config', type=str, help='Path to JSON configuration file')
+    return parser.parse_args()
 
-if __name__ == "__main__":
+# Read configuration from JSON file
+def read_config(config_file):
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        print(f"Loaded configuration from {config_file}")
+        return config
+    except Exception as e:
+        print(f"Error reading config file {config_file}: {e}")
+        sys.exit(1)
+
+# Parse arguments
+args = parse_args()
+DEBUG = args.debug
+
+# ANSI color codes
+GREEN = '\033[32m'
+RED   = '\033[31m'
+RESET = '\033[0m'
+
+# Pre-flight checks
+required_bins = {
+    'vtysh': 'FRR (vtysh)',
+    'radclient': 'FreeRADIUS client (radclient)',
+    'dig': 'DNS lookup utility (dig)',
+    'ntpdate': 'NTP utility (ntpdate)',
+    'curl': 'HTTPS test utility (curl)',
+    'nc': 'Netcat (nc) for UDP connectivity testing',
+    'openssl': 'OpenSSL for SSL certificate verification'
+}
+missing = [name for name in required_bins if shutil.which(name) is None]
+if missing:
+    print('Error: the following required tools are missing:')
+    for name in missing:
+        print(f'  - {required_bins[name]}')
+    print()
+    print('Please install them, e.g.:')
+    print('  sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl netcat-openbsd openssl')
+    sys.exit(1)
+
+# Wrapper for subprocess.run with debug
+def run_cmd(cmd, **kwargs):
+    if DEBUG:
+        printed = cmd if isinstance(cmd, str) else ' '.join(cmd)
+        print(f'DEBUG: Running: {printed} | kwargs={kwargs}')
+    
+    # Use Popen instead of subprocess.run to avoid buffer deadlocks
+    if kwargs.get('capture_output'):
+        # Create pipes for stdout and stderr
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=kwargs.get('text', False),
+            shell=kwargs.get('shell', False)
+        )
+        
+        # Read stdout and stderr incrementally to avoid buffer deadlocks
+        stdout_data = []
+        stderr_data = []
+        
+        while True:
+            # Read from stdout and stderr without blocking
+            stdout_chunk = process.stdout.read(1024)
+            stderr_chunk = process.stderr.read(1024)
+            
+            # If we got data, store it
+            if stdout_chunk:
+                stdout_data.append(stdout_chunk)
+            if stderr_chunk:
+                stderr_data.append(stderr_chunk)
+            
+            # Check if process has finished
+            if process.poll() is not None:
+                # Read any remaining data
+                stdout_chunk = process.stdout.read()
+                stderr_chunk = process.stderr.read()
+                if stdout_chunk:
+                    stdout_data.append(stdout_chunk)
+                if stderr_chunk:
+                    stderr_data.append(stderr_chunk)
+                break
+            
+            # Small sleep to avoid CPU spinning
+            time.sleep(0.01)
+        
+        # Join the data
+        stdout_output = ''.join(stdout_data) if kwargs.get('text', False) else b''.join(stdout_data)
+        stderr_output = ''.join(stderr_data) if kwargs.get('text', False) else b''.join(stderr_data)
+        
+        # Create a CompletedProcess object to match subprocess.run's return value
+        proc = subprocess.CompletedProcess(
+            args=cmd,
+            returncode=process.returncode,
+            stdout=stdout_output,
+            stderr=stderr_output
+        )
+        
+        if DEBUG:
+            print('DEBUG: stdout:')
+            print(proc.stdout)
+            print('DEBUG: stderr:')
+            print(proc.stderr)
+    else:
+        # If we're not capturing output, just use subprocess.run
+        proc = subprocess.run(cmd, **kwargs)
+    
+    if kwargs.get('check') and proc.returncode != 0:
+        if DEBUG:
+            print(f'DEBUG: Command failed with return code {proc.returncode}')
+        proc.check_returncode()
+    
+    return proc
+
+# Prompt helper
+def prompt_nonempty(prompt):
+    while True:
+        val = input(prompt).strip()
+        if val:
+            return val
+        print('  -> This value cannot be blank.')
+
+# Gather user input
+def get_user_input(config_file=None):
+    # If config file is provided, use it
+    if config_file:
+        config = read_config(config_file)
+        test_iface = config.get('test_interface', 'enxf0a731f41761')
+        ip_addr = config.get('ip_address')
+        netmask = config.get('netmask')
+        gateway = config.get('gateway')
+        mgmt_interface = config.get('mgmt_interface', 'end0')
+        mgmt1 = config.get('nsb_subnet')
+        mgmt2 = config.get('sensor_subnet')
+        client_subnet = config.get('client_subnet')
+        run_dhcp = config.get('run_dhcp_tests', False)
+        dhcp_servers = config.get('dhcp_servers', [])
+        run_radius = config.get('run_radius_tests', False)
+        radius_servers = config.get('radius_servers', [])
+        secret = config.get('radius_secret')
+        username = config.get('radius_username')
+        password = config.get('radius_password')
+        run_custom_dns_tests = config.get('run_custom_dns_tests', False)
+        custom_dns_servers = config.get('custom_dns_servers', []) if run_custom_dns_tests else []
+        run_custom_ntp_tests = config.get('run_custom_ntp_tests', False)
+        custom_ntp_servers = config.get('custom_ntp_servers', []) if run_custom_ntp_tests else []
+        
+        # Validate required fields
+        missing = []
+        for field, value in [
+            ('ip_address', ip_addr),
+            ('netmask', netmask),
+            ('gateway', gateway),
+            ('nsb_subnet', mgmt1),
+            ('sensor_subnet', mgmt2),
+            ('client_subnet', client_subnet)
+        ]:
+            if not value:
+                missing.append(field)
+        
+        if missing:
+            print(f"Error: Missing required fields in config file: {', '.join(missing)}")
+            sys.exit(1)
+            
+        # Validate RADIUS fields if RADIUS tests are enabled
+        if run_radius:
+            missing = []
+            for field, value in [
+                ('radius_servers', radius_servers),
+                ('radius_secret', secret),
+                ('radius_username', username),
+                ('radius_password', password)
+            ]:
+                if not value:
+                    missing.append(field)
+            
+            if missing:
+                print(f"Error: RADIUS tests enabled but missing fields: {', '.join(missing)}")
+                sys.exit(1)
+        
+        # Validate DHCP fields if DHCP tests are enabled
+        if run_dhcp and not dhcp_servers:
+            print("Error: DHCP tests enabled but no DHCP servers specified")
+            sys.exit(1)
+            
+        print("\nUsing configuration from file:")
+        print(f"  Management Interface: {mgmt_interface}")
+        print(f"  NSB Testing Interface: {test_iface}")
+        print(f"  IP Address: {ip_addr}")
+        print(f"  Netmask: {netmask}")
+        print(f"  Gateway: {gateway}")
+        print(f"  NSB Subnet: {mgmt1}")
+        print(f"  Sensor Subnet: {mgmt2}")
+        print(f"  Client Subnet: {client_subnet}")
+        print(f"  Run DHCP Tests: {run_dhcp}")
+        if run_dhcp:
+            print(f"  DHCP Servers: {', '.join(dhcp_servers)}")
+        print(f"  Run RADIUS Tests: {run_radius}")
+        if run_radius:
+            print(f"  RADIUS Servers: {', '.join(radius_servers)}")
+        print(f"  Run Custom DNS Tests: {run_custom_dns_tests}")
+        if run_custom_dns_tests:
+            print(f"  Custom DNS Servers: {', '.join(custom_dns_servers)}")
+        print(f"  Run Custom NTP Tests: {run_custom_ntp_tests}")
+        if run_custom_ntp_tests:
+            print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
+    else:
+        # Interactive mode
+        print("\nNetwork Interface Configuration:")
+        print("--------------------------------")
+        mgmt_interface = prompt_nonempty('Management interface of host to keep enabled (default: end0): ') or 'end0'
+        test_iface     = prompt_nonempty('Interface for Nile Readiness tests (default: enxf0a731f41761): ') or 'enxf0a731f41761'
+        ip_addr       = prompt_nonempty('IP address for NSB Gateway interface: ')
+        netmask       = prompt_nonempty('Netmask (e.g. 255.255.255.0): ')
+        gateway       = prompt_nonempty('Router or Firewall IP: ')
+        mgmt1         = prompt_nonempty('NSB subnet (CIDR, e.g. 192.168.1.0/24): ')
+        mgmt2         = prompt_nonempty('Sensor subnet (CIDR): ')
+        client_subnet = prompt_nonempty('Client subnet (CIDR): ')
+
+        run_dhcp = input('Perform DHCP tests? [y/N]: ').strip().lower().startswith('y')
+        dhcp_servers = []
+        if run_dhcp:
+            dhcp_servers = [ip.strip() for ip in prompt_nonempty(
+                'DHCP server IP(s) (comma-separated): ').split(',')]
+
+        run_radius = input('Perform RADIUS tests? [y/N]: ').strip().lower().startswith('y')
+        radius_servers = []
+        secret = username = password = None
+        if run_radius:
+            radius_servers = [ip.strip() for ip in prompt_nonempty(
+                'RADIUS server IP(s) (comma-separated): ').split(',')]
+            secret   = prompt_nonempty('RADIUS shared secret: ')
+            username = prompt_nonempty('RADIUS test username: ')
+            password = prompt_nonempty('RADIUS test password: ')
+
+    # For interactive mode, custom_dns_servers and custom_ntp_servers are empty lists
+    if not config_file:
+        custom_dns_servers = []
+        custom_ntp_servers = []
+        
+        # Ask for custom DNS servers
+        custom_dns = input('Add custom DNS servers for testing? [y/N]: ').strip().lower()
+        if custom_dns.startswith('y'):
+            custom_dns_input = prompt_nonempty('Enter custom DNS server IP(s) (comma-separated): ')
+            custom_dns_servers = [ip.strip() for ip in custom_dns_input.split(',')]
+            
+        # Ask for custom NTP servers
+        custom_ntp = input('Add custom NTP servers for testing? [y/N]: ').strip().lower()
+        if custom_ntp.startswith('y'):
+            custom_ntp_input = prompt_nonempty('Enter custom NTP server(s) (comma-separated): ')
+            custom_ntp_servers = [server.strip() for server in custom_ntp_input.split(',')]
+    
+    # Print custom DNS and NTP servers if provided
+    if custom_dns_servers:
+        print(f"  Custom DNS Servers: {', '.join(custom_dns_servers)}")
+    if custom_ntp_servers:
+        print(f"  Custom NTP Servers: {', '.join(custom_ntp_servers)}")
+    
+    return (test_iface, ip_addr, netmask, gateway, mgmt_interface,
+            mgmt1, mgmt2, client_subnet,
+            dhcp_servers, radius_servers, secret, username, password,
+            run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
+
+# Record/restore host state
+def record_state(iface):
+    if DEBUG:
+        print(f"Recording state of interface {iface}...")
+    state = {}
+    out = run_cmd(['ip','addr','show','dev',iface], capture_output=True, text=True).stdout
+    state['addrs']  = [l.split()[1] for l in out.splitlines() if 'inet ' in l]
+    state['routes'] = run_cmd(['ip','route','show','default'], capture_output=True, text=True).stdout.splitlines()
+    with open('/etc/frr/daemons') as f: state['daemons'] = f.read()
+    with open('/etc/resolv.conf') as f: state['resolv'] = f.read()
+    svc = run_cmd(['systemctl','is-enabled','frr'], capture_output=True, text=True)
+    state['frr_enabled'] = (svc.returncode == 0)
+    return state
+
+def restore_state(iface, state):
+    if DEBUG:
+        print('\nRestoring original state...')
+    
+    # First, remove dummy interfaces
+    if DEBUG:
+        print("Removing dummy interfaces...")
+    for name in ('mgmt1','mgmt2','client'):
+        run_cmd(['ip','link','delete',f'dummy_{name}'], check=False, capture_output=True)
+    
+    # Flush the interface
+    if DEBUG:
+        print(f"Flushing interface {iface}...")
+    run_cmd(['ip','addr','flush','dev',iface], check=True, capture_output=True)
+    
+    # Apply a temporary IP configuration if there are no addresses in the state
+    # This helps with the "Nexthop has invalid gateway" error
+    # Use 0.0.0.0/0 without setting a default gateway to avoid adding additional routes
+    if not state['addrs']:
+        if DEBUG:
+            print("No original addresses found, applying temporary IP configuration...")
+        run_cmd(['ip','addr','add','0.0.0.0/0','dev',iface], check=False, capture_output=True)
+        run_cmd(['ip','link','set','dev',iface,'up'], check=False, capture_output=True)
+    
+    # Add back the original addresses
+    if DEBUG:
+        print("Restoring original IP addresses...")
+    for addr in state['addrs']:
+        run_cmd(['ip','addr','add',addr,'dev',iface], check=False, capture_output=True)
+    
+    # Make sure the interface is up
+    if DEBUG:
+        print(f"Ensuring interface {iface} is up...")
+    run_cmd(['ip','link','set','dev',iface,'up'], check=False, capture_output=True)
+    
+    # Flush default routes
+    if DEBUG:
+        print("Flushing default routes...")
+    run_cmd(['ip','route','flush','default'], check=False, capture_output=True)
+    
+    # Restore FRR configuration
+    if DEBUG:
+        print("Restoring FRR configuration...")
+    with open('/etc/frr/daemons','w') as f: f.write(state['daemons'])
+    run_cmd(['rm','-f','/etc/frr/frr.conf'], check=False, capture_output=True)
+    
+    # Restore DNS configuration
+    if DEBUG:
+        print("Restoring DNS configuration...")
+    with open('/etc/resolv.conf','w') as f: f.write(state['resolv'])
+    
+    # Stop and disable FRR
+    if DEBUG:
+        print("Stopping and disabling FRR...")
+    run_cmd(['systemctl','stop','frr'], check=False, capture_output=True)
+    run_cmd(['systemctl','disable','frr'], check=False, capture_output=True)
+    
+    if DEBUG:
+        print('Removed FRR config, stopped service, restored DNS.')
+
+# Configure main interface
+def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
+
+    if DEBUG:
+        print(f'Configuring {iface} → {ip_addr}/{netmask}')
+    
+    # Get a list of all network interfaces
+    if DEBUG:
+        print("Getting list of network interfaces...")
+    interfaces_output = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+    interfaces = []
+    for line in interfaces_output.splitlines():
+        if ': ' in line:
+            # Extract interface name (remove number and colon)
+            interface_name = line.split(': ')[1].split('@')[0]
+            interfaces.append(interface_name)
+    
+    # Check for and clean up dummy interfaces from previous runs
+    if DEBUG:
+        print("Checking for dummy interfaces from previous runs...")
+    dummy_interfaces = ['dummy_mgmt1', 'dummy_mgmt2', 'dummy_client']
+    for dummy in dummy_interfaces:
+        if dummy in interfaces:
+            if DEBUG:
+                print(f"Removing leftover dummy interface {dummy}...")
+            run_cmd(['ip', 'link', 'delete', dummy], check=False)
+    
+    # Check if management interface has a default gateway and remove it
+    if mgmt_interface in interfaces and mgmt_interface != iface:
+        if DEBUG:
+            print(f"Checking if management interface {mgmt_interface} has a default gateway...")
+        route_output = run_cmd(['ip', 'route', 'show', 'dev', mgmt_interface], capture_output=True, text=True).stdout
+        if 'default' in route_output:
+            if DEBUG:
+                print(f"Removing default gateway from management interface {mgmt_interface}...")
+            run_cmd(['ip', 'route', 'del', 'default', 'dev', mgmt_interface], check=False)
+            if DEBUG:
+                print(f"Default gateway removed from {mgmt_interface}")
+    
+    # Disable all interfaces except loopback and management interface
+    if DEBUG:
+        print(f"Disabling all interfaces except loopback and {mgmt_interface} (management interface)...")
+    interfaces_to_disable = [interface for interface in interfaces 
+                            if interface != 'lo' and interface != mgmt_interface and not interface.startswith('dummy_')]
+    
+    # First attempt to disable all interfaces
+    for interface in interfaces_to_disable:
+        if DEBUG:
+            print(f"Disabling interface {interface}...")
+        run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+    
+    # Verify interfaces are actually down and retry if needed
+    if DEBUG:
+        print("Verifying interfaces are down...")
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        all_down = True
+        interfaces_output = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+        for interface in interfaces_to_disable:
+            # Check if interface is still up
+            if f"{interface}: " in interfaces_output and "state UP" in interfaces_output.split(f"{interface}: ")[1].split("\n")[0]:
+                if DEBUG:
+                    print(f"Interface {interface} is still up, retrying...")
+                run_cmd(['ip', 'link', 'set', 'dev', interface, 'down'], check=False)
+                all_down = False
+        
+        if all_down:
+            if DEBUG:
+                print("All interfaces successfully disabled.")
+            break
+        
+        if attempt < max_attempts - 1:
+            if DEBUG:
+                print(f"Some interfaces still up. Waiting before retry {attempt+1}/{max_attempts}...")
+            time.sleep(2)
+    
+    # Configure the specified interface
+    if DEBUG:
+        print(f'Configuring {iface}...')
+    prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
+    
+    # Then flush and configure
+    if DEBUG:
+        print(f"Flushing and configuring {iface}...")
+    run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=True)
+    run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
+    
+    # Finally enable the interface
+    if DEBUG:
+        print(f"Enabling {iface}...")
+    run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+    
+    # Ensure the interface is up and properly configured with retry logic
+    if DEBUG:
+        print(f"\nEnsuring interface {iface} is up and properly configured...")
+    max_retries = 5
+    retry_delay = 2
+    interface_up = False
+    
+    for attempt in range(max_retries):
+        # Check if interface is up
+        iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+        iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', iface], capture_output=True, text=True).stdout
+        
+        if "state UP" in iface_status and f"inet {ip_addr}" in iface_addr:
+            if DEBUG:
+                print(f"Interface {iface} is up and properly configured with IP {ip_addr}")
+            interface_up = True
+            break
+        else:
+            if DEBUG:
+                print(f"Attempt {attempt+1}/{max_retries}: Interface {iface} is not properly configured")
+            if "state UP" not in iface_status:
+                if DEBUG:
+                    print(f"  - Interface is not up, bringing it up...")
+                run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+            
+            if f"inet {ip_addr}" not in iface_addr:
+                if DEBUG:
+                    print(f"  - IP address {ip_addr} not configured, reconfiguring...")
+                run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=False)
+                run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
+            
+            if DEBUG:
+                print(f"  - Waiting {retry_delay} seconds before checking again...")
+            time.sleep(retry_delay)
+    
+    if not interface_up:
+        print(f"{RED}ERROR: Failed to bring up interface {iface} after {max_retries} attempts.{RESET}")
+        print("This will likely cause subsequent tests to fail.")
+        print("Continuing anyway, but expect failures...")
+    
+    return interface_up
+
+# Add loopbacks
+def add_loopbacks(m1,m2,client):
+    for name,subnet in [('mgmt1',m1),('mgmt2',m2),('client',client)]:
+        net = ipaddress.IPv4Network(subnet)
+        iface = f'dummy_{name}'
+        addr = str(net.network_address+1)
+        prefix = net.prefixlen
+        run_cmd(['ip','link','add',iface,'type','dummy'], check=False)
+        run_cmd(['ip','addr','add',f'{addr}/{prefix}','dev',iface], check=False)
+        run_cmd(['ip','link','set','dev',iface,'up'], check=True)
+        if DEBUG:
+            print(f'Loopback {iface} → {addr}/{prefix}')
+
+# OSPF Hello sniff
+def sniff_ospf_hello(iface, timeout=60):
+    print(f'\nWaiting for OSPF Hello on {iface}...')
+    
+    # Use scapy to sniff for OSPF Hello packets
+    pkts = sniff(iface=iface, filter='ip proto 89', timeout=timeout, count=1)
+    if not pkts:
+        print('No OSPF Hello received; aborting.')
+        sys.exit(1)
+    
+    pkt = pkts[0]
+    src = pkt[IP].src
+    area = pkt[OSPF_Hdr].area
+    hi = pkt[OSPF_Hello].hellointerval
+    di = pkt[OSPF_Hello].deadinterval
+    
+    print(f"Received OSPF Hello from {src} (Area: {area}, Hello: {hi}s, Dead: {di}s)")
+    
+    # Don't cast area to int as it can be in dotted notation (e.g., 0.0.0.0)
+    return src, area, int(hi), int(di)
+
+# Configure OSPF - using vtysh commands directly like the original
+def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
+    n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
+    
+    if DEBUG:
+        print(f"Configuring FRR and OSPF for interface {iface}")
+    
+    # Enable ospfd in daemons file
+    lines=open('/etc/frr/daemons').read().splitlines()
+    with open('/etc/frr/daemons','w') as f:
+        for l in lines: f.write('ospfd=yes\n' if l.startswith('ospfd=') else l+'\n')
+    
+    # Restart FRR
+    if DEBUG:
+        print("Restarting FRR...")
+    run_cmd(['systemctl', 'restart', 'frr'], check=True)
+    
+    # Wait for FRR to start
+    if DEBUG:
+        print("Waiting for FRR to start...")
+    time.sleep(5)
+    
+    # Configure OSPF using vtysh commands
+    cmds=[
+        'vtysh','-c','configure terminal','-c','router ospf',
+        '-c',f'network {ip}/{prefix} area {area}',
+        '-c',f'network {n1.network_address}/{n1.prefixlen} area {area}',
+        '-c',f'network {n2.network_address}/{n2.prefixlen} area {area}',
+        '-c',f'network {n3.network_address}/{n3.prefixlen} area {area}',
+        '-c','exit','-c',f'interface {iface}',
+        '-c',f'ip ospf hello-interval {hi}',
+        '-c',f'ip ospf dead-interval {di}',
+        '-c','exit','-c','end','-c','write memory'
+    ]
+    run_cmd(cmds, check=True, capture_output=True)
+    
+    # Verify interface is up and properly configured
+    if DEBUG:    
+        print(f"Verifying interface {iface} is up and properly configured...")
+    iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+
+    if "state UP" not in iface_status:
+        if DEBUG:
+            print(f"Interface {iface} is not up. Attempting to bring it up...")
+        run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+        # Wait for interface to come up
+        time.sleep(2)
+        # Check again
+        iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+        if "state UP" not in iface_status:
+            print(f"WARNING: Interface {iface} could not be brought up. OSPF may not work correctly.")
+    
+    # Verify IP address is configured
+    iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', iface], capture_output=True, text=True).stdout
+    if f"inet {ip}" not in iface_addr:
+        if DEBUG:
+            print(f"IP address {ip} not found on interface {iface}. Reconfiguring...")
+        run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=False)
+        run_cmd(['ip', 'addr', 'add', f'{ip}/{prefix}', 'dev', iface], check=True)
+    
+    # Show the routing table
+    route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
+    if DEBUG:
+        print("Current routing table:")
+        print(route_output)
+    
+    # Check connectivity to the upstream router with retry logic
+    print(f"Testing connectivity to upstream router {up}")
+    max_retries = 3
+    retry_delay = 5
+    router_reachable = False
+    
+    for attempt in range(max_retries):
+        ping_result = run_cmd(['ping', '-c', '4', up], capture_output=True)
+        if ping_result.returncode == 0:
+            router_reachable = True
+            print(f"Connectivity to upstream router {up}: {GREEN}Success{RESET}")
+            break
+        else:
+            print(f"Attempt {attempt+1}/{max_retries}: Connectivity to upstream router {up}: {RED}Fail{RESET}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    
+    if not router_reachable:
+        print(f"{RED}ERROR: Failed to reach upstream router {up} after {max_retries} attempts.{RESET}")
+        print(f"{RED}There is no reason to continue tests without upstream router connectivity.{RESET}")
+        print(f"{RED}Terminating tests...{RESET}")
+        sys.exit(1)
+    
+    print("OSPF configuration complete")
+
+# Show OSPF state Full/DR - using the original approach with active waiting
+def show_ospf_status():
+    print('\n=== Waiting for OSPF state Full/DR (30s timeout) ===')
+    success = False
+    for _ in range(30):
+        out = run_cmd(['vtysh','-c','show ip ospf neighbor'], capture_output=True, text=True).stdout
+        if any('Full/DR' in l for l in out.splitlines()[1:]):
+            success = True
+            print('OSPF reached Full/DR state')
+            break
+        time.sleep(1)
+    if not success:
+        print('OSPF never reached Full/DR state after 30s')
+    
+    # Wait a bit more to ensure stability
+    time.sleep(5)
+    
+    # Show the routing table from FRR
+    frr_routes = run_cmd(['vtysh', '-c', 'show ip route'], capture_output=True, text=True).stdout
+    if DEBUG:
+        print("\n=== FRR Routing Table ===")
+        print(frr_routes)
+    
+    # Show the kernel routing table
+    route_output = run_cmd(['ip', 'route'], capture_output=True, text=True).stdout
+    if DEBUG:
+        print(f'\n=== Kernel Routing Table ===')
+        print(route_output)
+    
+    return success
+
+# Add floating static default
+def configure_static_route(gateway, iface):
+    """
+    Configure a static default route and verify it was added successfully.
+    
+    Args:
+        gateway: Gateway IP address
+        iface: Interface name
+        
+    Returns:
+        bool: True if route was added successfully, False otherwise
+    """
+    if DEBUG:
+        print(f"\nConfiguring static default route via {gateway} on {iface}...")
+    
+    # Try to add the route
+    run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
+    
+    # Verify the route was added
+    max_retries = 5
+    retry_delay = 2
+    route_added = False
+    
+    for attempt in range(max_retries):
+        # Check if route exists
+        route_output = run_cmd(['ip','route','show','default'], capture_output=True, text=True).stdout
+        if f"default via {gateway}" in route_output:
+            if DEBUG:
+                print(f"Static default route via {gateway} successfully added")
+            route_added = True
+            break
+        else:
+            if DEBUG:
+                print(f"Attempt {attempt+1}/{max_retries}: Static route not found")
+                print(f"  - Current default routes:")
+                for line in route_output.splitlines():
+                    print(f"    {line}")
+            
+            # Try to ensure interface is up before adding route
+            iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
+            if "state UP" not in iface_status:
+                if DEBUG:
+                    print(f"  - Interface {iface} is not up, bringing it up...")
+                run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
+                time.sleep(1)  # Give it a moment to come up
+            
+            # Try adding the route again
+            if DEBUG:
+                print(f"  - Retrying route addition...")
+            # First try to delete any existing default routes to avoid conflicts
+            run_cmd(['ip','route','del','default'], check=False)
+            # Then add our route
+            run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
+            
+            if DEBUG:
+                print(f"  - Waiting {retry_delay} seconds before checking again...")
+            time.sleep(retry_delay)
+    
+    if not route_added:
+        print(f"{RED}ERROR: Failed to add static default route via {gateway} after {max_retries} attempts.{RESET}")
+        print("This will likely cause subsequent tests to fail.")
+        print("Continuing anyway, but expect failures...")
+    
+    return route_added
+
+# Connectivity tests with DNS fallback logic
+def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius, custom_dns_servers=None, custom_ntp_servers=None, test_results=None):
+    # Initialize empty lists if None
+    custom_dns_servers = custom_dns_servers or []
+    custom_ntp_servers = custom_ntp_servers or []
+    # Dictionary to store test results for summary
+    if test_results is None:
+        test_results = []
+    # Set initial DNS
+    dns_servers = ['8.8.8.8', '8.8.4.4']
+    
+    # Write DNS servers to resolv.conf
+    def write_resolv(servers):
+        with open('/etc/resolv.conf','w') as f:
+            for s in servers:
+                f.write(f'nameserver {s}\n')
+    write_resolv(dns_servers)
+    conf.route.resync()
+    
+    # Initial connectivity
+    ping_ok = dns_ok = False
+    print(f'\nInitial Ping Tests from {ip_addr}:')
+    
+    # Test default DNS servers with retry logic
+    for tgt in dns_servers:
+        # First attempt
+        r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
+        result = r.returncode == 0
+        
+        # If first attempt fails, retry once more
+        if not result:
+            print(f'Ping {tgt} from {ip_addr}: {RED}Fail{RESET} (First attempt)')
+            print(f'Retrying ping to {tgt}...')
+            r = run_cmd(['ping', '-c', '3', '-I', ip_addr, tgt], capture_output=True)  # Try with more pings
+            result = r.returncode == 0
+        
+        print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail{RESET} (After retry)'))
+        test_results.append((f'Initial Ping {tgt} from {ip_addr}', result))
+        ping_ok |= result
+    
+    # Test custom DNS servers if provided (with retry logic)
+    if custom_dns_servers:
+        print(f'\nCustom DNS Server Ping Tests from {ip_addr}:')
+        custom_ping_ok = False
+        for tgt in custom_dns_servers:
+            # First attempt
+            r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
+            result = r.returncode == 0
+            
+            # If first attempt fails, retry once more
+            if not result:
+                print(f'Ping {tgt} from {ip_addr}: {RED}Fail{RESET} (First attempt)')
+                print(f'Retrying ping to {tgt}...')
+                r = run_cmd(['ping', '-c', '3', '-I', ip_addr, tgt], capture_output=True)  # Try with more pings
+                result = r.returncode == 0
+            
+            print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail{RESET} (After retry)'))
+            test_results.append((f'Initial Ping Custom DNS {tgt} from {ip_addr}', result))
+            custom_ping_ok |= result
+        
+        # Update ping_ok to include custom DNS server ping results
+        ping_ok |= custom_ping_ok
+
+
+    print(f'\nInitial DNS Tests from {ip_addr} (@ ' + ', '.join(dns_servers) + '):')
+    for d in dns_servers:
+        r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
+        ok = (r.returncode==0 and bool(r.stdout.strip()))
+        print(f'DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'Initial DNS @{d} from {ip_addr}', ok))
+
+    # Custom DNS tests from iface interface if provided
+    if custom_dns_servers:
+        print(f'\n=== Custom DNS tests from {ip_addr} ===')
+        for d in custom_dns_servers:
+            r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
+            ok = (r.returncode==0 and bool(r.stdout.strip()))
+            print(f'Custom DNS @{d} from {ip_addr}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+            test_results.append((f'Custom DNS @{d} from {ip_addr}', ok))
+        
+        # If custom DNS servers are provided and successful, use them
+        successful_custom_dns = []
+        for d in custom_dns_servers:
+            r = run_cmd(['dig', f'@{d}', '-b', ip_addr, 'www.google.com', '+short'], capture_output=True, text=True)
+            if r.returncode == 0 and bool(r.stdout.strip()):
+                successful_custom_dns.append(d)
+        
+        if successful_custom_dns:
+            print(f"\nUsing successful custom DNS servers: {', '.join(successful_custom_dns)}")
+            dns_servers = successful_custom_dns
+            write_resolv(dns_servers)
+            # Skip the prompt for DNS servers if we're using custom ones
+            if not args.config:  # Only in interactive mode
+                print("Using custom DNS servers instead of prompting for new ones.")
+        else:
+            # If no custom DNS servers were successful, prompt for new ones
+            new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
+            dns_servers = [s.strip() for s in new_dns.split(',')]
+            write_resolv(dns_servers)
+    else:
+        # No custom DNS servers provided, prompt for new ones
+        new_dns = prompt_nonempty('Enter DNS server IP(s) (comma-separated): ')
+        dns_servers = [s.strip() for s in new_dns.split(',')]
+        write_resolv(dns_servers)
+
+    if not ping_ok:
+        print(f"\n{RED}ERROR: Initial connectivity tests beyond local network have failed.{RESET}")
+        print(f"{RED}All DNS servers (default and custom) are unreachable.{RESET}")
+        print(f"{RED}Please validate your routing configuration and try again.{RESET}")
+        print(f"{RED}Terminating tests...{RESET}")
+        sys.exit(1)
+
+    # Full suite
+    print(f'\nFull Test Suite:')
+    
+    # Get the IP address of the mgmt1 dummy loopback interface
+    mgmt1_ip = str(ipaddress.IPv4Network(mgmt1).network_address+1)
+    print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
+    
+    # Verify the dummy loopback interface is working properly with retry logic
+    if DEBUG:
+        print(f"Verifying {mgmt1_ip} can reach external targets...")
+    max_retries = 5
+    retry_delay = 2
+    loopback_working = False
+    
+    for attempt in range(max_retries):
+        if DEBUG:
+            print(f"Attempt {attempt+1}/{max_retries}: Testing connectivity from {mgmt1_ip}...")
+        ping_result = run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
+        if ping_result.returncode == 0:
+            if DEBUG:
+                print(f"Connectivity from {mgmt1_ip}: {GREEN}Success{RESET}")
+            loopback_working = True
+            break
+        else:
+            if DEBUG:
+                print(f"Connectivity from {mgmt1_ip}: {RED}Fail{RESET}")
+                print(f"Waiting {retry_delay} seconds before retrying...")
+            time.sleep(retry_delay)
+    
+    if not loopback_working:
+        print(f"\n{RED}ERROR: Could not establish connectivity from the dummy loopback interface {mgmt1_ip}.{RESET}")
+        print(f"{RED}Please try the test again after resolving network issues.{RESET}")
+        print(f"{RED}Terminating tests...{RESET}")
+        return test_results  # Return early with the tests we've done so far
+
+    # Ping tests
+    print(f'\n=== Ping tests ===')
+    for tgt in dns_servers:
+        r = run_cmd(['ping', '-c', '4', '-I', mgmt1_ip, tgt], capture_output=True, text=True)
+        result = r.returncode == 0
+        print(f'Ping {tgt} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'Ping {tgt} from {mgmt1_ip}', result))
+    
+    # DNS tests
+    print(f'\n=== DNS tests ===')
+    for d in dns_servers:
+        r = run_cmd(['dig', f'@{d}', '-b', mgmt1_ip, 'www.google.com', '+short'], capture_output=True, text=True)
+        ok = (r.returncode==0 and bool(r.stdout.strip()))
+        print(f'DNS @{d} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if ok else RED+'Fail'+RESET))
+        test_results.append((f'DNS @{d} from {mgmt1_ip}', ok))
+    
+    # DHCP relay with ping pre-check - using dhcppython library
+    if run_dhcp:
+        print(f'\n=== DHCP tests (L3 relay) ===')
+        # Use the first IP of the client subnet as the helper IP (giaddr)
+        helper_ip = str(ipaddress.IPv4Network(client_subnet).network_address+1)
+        print(f"Using client subnet first IP {helper_ip} as DHCP relay agent (giaddr)")
+        
+        # For the source IP, we should use the helper IP address (giaddr)
+        # This is what the server will see as the source of the packet
+        source_ip = helper_ip
+        if DEBUG:
+            print(f"Using helper IP {source_ip} as source IP for DHCP packets")
+        
+        for srv in dhcp_servers:
+            p = run_cmd(['ping', '-c', '5', srv], capture_output=True)
+            if p.returncode != 0:
+                result = False
+                print(f'DHCP relay to {srv}: {RED}Fail (unreachable){RESET}')
+                test_results.append((f'DHCP relay to {srv}', result))
+                continue
+            
+            # Get the MAC address for the main interface
+            iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
+            iface_mac = None
+            for line in iface_mac_output.splitlines():
+                if 'link/ether' in line:
+                    iface_mac = line.split()[1]
+                    break
+            
+            if not iface_mac:
+                print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
+                iface_mac = dhcp_utils.random_mac()
+                
+            # Create a random client MAC address
+            client_mac = dhcp_utils.random_mac()
+            
+            # Using dhcppython for DHCP testing
+
+            if DEBUG:
+                print(f"DHCP Test Details:")
+                print(f"  Interface: {iface} (MAC: {iface_mac})")
+                print(f"  Source IP: {source_ip}")
+                print(f"  Destination IP: {srv}")
+                print(f"  Client MAC: {client_mac}")
+            
+            try:
+                # Create DHCP client using the main interface
+                if DEBUG:
+                    print(f"Creating DHCP client on {iface} interface...")
+                c = dhcp_client.DHCPClient(
+                    iface,
+                    send_from_port=67,  # Server port (for relay)
+                    send_to_port=67     # Server port
+                )
+                
+                # Create a list of DHCP options
+                if DEBUG:
+                    print(f"Setting up DHCP options...")
+                options_list = dhcp_options.OptionList([
+                    # Add standard options
+                    dhcp_options.options.short_value_to_object(60, "nile-readiness-test"),  # Class identifier
+                    dhcp_options.options.short_value_to_object(12, socket.gethostname()),   # Hostname
+                    # Parameter request list - request common options
+                    dhcp_options.options.short_value_to_object(55, [1, 3, 6, 15, 26, 28, 51, 58, 59, 43])
+                ])
+                
+                if DEBUG:
+                    print(f"Attempting to get DHCP lease from {srv}...")
+                # Set broadcast=False for unicast to specific server
+                # Set server to the DHCP server IP
+                try:
+                    lease = c.get_lease(
+                        client_mac,
+                        broadcast=False,
+                        options_list=options_list,
+                        server=srv,
+                        relay=helper_ip
+                    )
+                    
+                    # If we get here, we got a lease
+                    if DEBUG:
+                        print(f"\nSuccessfully obtained DHCP lease!")
+                        print(f"DEBUG: Lease details:")
+                        print(f"  Your IP: {lease.ack.yiaddr}")
+                        print(f"  Server IP: {lease.ack.siaddr}")
+                        print(f"  Gateway: {lease.ack.giaddr}")
+                        print(f"  Options: {lease.ack.options}")
+                    
+                    result = True
+                    print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
+                    test_results.append((f'DHCP relay to {srv}', result))
+                except Exception as e:
+                    print(f"Error during DHCP lease request: {e}")
+                    if DEBUG:
+                        import traceback
+                        traceback.print_exc()
+                    result = False
+                    print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
+                    test_results.append((f'DHCP relay to {srv}', result))
+                
+                
+            except Exception as e:
+                print(f"Error during DHCP test: {e}")
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
+                result = False
+                print(f'DHCP relay to {srv}: ' + RED+'Fail'+RESET)
+                test_results.append((f'DHCP relay to {srv}', result))
+    else:
+        print('\nSkipping DHCP tests')
+
+    # RADIUS with ping pre-check
+    if run_radius:
+        print(f'\n=== RADIUS tests ===')
+        for srv in radius_servers:
+            p = run_cmd(['ping', '-c', '1', srv], capture_output=True)
+            if p.returncode != 0:
+                result = False
+                print(f'RADIUS {srv}: {RED}Fail (unreachable){RESET}')
+                test_results.append((f'RADIUS {srv}', result))
+                continue
+            cmd = (f'echo "User-Name={user},User-Password={pwd}" '
+                  f'| radclient -x -s {srv}:1812 auth {secret}')
+            res = run_cmd(cmd, shell=True, capture_output=True, text=True)
+            result = res.returncode == 0
+            print(f'RADIUS {srv}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'RADIUS {srv}', result))
+    else:
+        print('\nSkipping RADIUS tests')
+
+    # NTP tests from main interface
+    print(f'\n=== NTP tests from main interface ({ip_addr}) ===')
+    # Test default NTP servers
+    for ntp in ('time.google.com', 'pool.ntp.org'):
+        r = run_cmd(['ntpdate', '-q', '-b', ip_addr, ntp], capture_output=True, text=True)
+        result = r.returncode == 0
+        print(f'NTP {ntp} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'NTP {ntp} from {ip_addr}', result))
+    
+    # Test custom NTP servers if provided
+    if custom_ntp_servers:
+        print(f'\n=== Custom NTP tests from main interface ({ip_addr}) ===')
+        for ntp in custom_ntp_servers:
+            r = run_cmd(['ntpdate', '-q', '-b', ip_addr, ntp], capture_output=True, text=True)
+            result = r.returncode == 0
+            print(f'Custom NTP {ntp} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Custom NTP {ntp} from {ip_addr}', result))
+    
+    # NTP tests from mgmt1
+    print(f'\n=== NTP tests from mgmt1 ({mgmt1_ip}) ===')
+    # Test default NTP servers
+    for ntp in ('time.google.com', 'pool.ntp.org'):
+        r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
+        result = r.returncode == 0
+        print(f'NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        test_results.append((f'NTP {ntp} from {mgmt1_ip}', result))
+    
+    # Test custom NTP servers if provided
+    if custom_ntp_servers:
+        print(f'\n=== Custom NTP tests from mgmt1 ({mgmt1_ip}) ===')
+        for ntp in custom_ntp_servers:
+            r = run_cmd(['ntpdate', '-q', '-b', mgmt1_ip, ntp], capture_output=True, text=True)
+            result = r.returncode == 0
+            print(f'Custom NTP {ntp} from {mgmt1_ip}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            test_results.append((f'Custom NTP {ntp} from {mgmt1_ip}', result))
+
+    # HTTPS and SSL Certificate tests
+    print(f'\n=== HTTPS and SSL Certificate tests ===')
+    
+    # Test HTTPS connectivity and SSL certificates for Nile Cloud from main interface
+    print(f'Testing HTTPS for {NILE_HOSTNAME} from {ip_addr}...')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((ip_addr, 0))  # Bind to ip_addr with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        if DEBUG:
+            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} ({e})')
+        else:
+            print(f'HTTPS {NILE_HOSTNAME} from {ip_addr}: {RED}Fail{RESET}')
+    test_results.append((f'HTTPS {NILE_HOSTNAME} from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity and SSL certificates for Nile Cloud from mgmt1
+    print(f'\nTesting HTTPS for {NILE_HOSTNAME} from {mgmt1_ip}...')
+    parsed = urlparse(f'https://{NILE_HOSTNAME}')
+    host, port = parsed.hostname, parsed.port or 443
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((mgmt1_ip, 0))  # Bind to mgmt1_ip with a random port
+        sock.connect((host, port))
+        sock.close()
+        https_ok = True
+        print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET}')
+    except Exception as e:
+        https_ok = False
+        if DEBUG:
+            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} ({e})')
+        else:
+            print(f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET}')
+    test_results.append((f'HTTPS {NILE_HOSTNAME} from {mgmt1_ip}', https_ok))
+    
+    # Now check the SSL certificate
+    print(f'\nChecking SSL certificate for {NILE_HOSTNAME}...')
+    # Use dig to resolve the hostname to IP addresses
+    r = run_cmd(['dig', NILE_HOSTNAME, '+short'], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        nile_ips = r.stdout.strip().split('\n')
+        print(f"\nResolved {NILE_HOSTNAME} to: {', '.join(nile_ips)}")
+        nile_ssl_success = False
+        for ip in nile_ips:
+            if check_ssl_certificate(ip, NILE_HOSTNAME, "Nile Global Inc."):
+                nile_ssl_success = True
+                print(f"SSL certificate for {NILE_HOSTNAME}: {GREEN}Success{RESET}")
+                break
+            else:
+                print(f"SSL certificate for {NILE_HOSTNAME} (IP: {ip}): {RED}Fail{RESET}")
+        test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", nile_ssl_success))
+    else:
+        print(f"Could not resolve {NILE_HOSTNAME} for SSL check")
+        test_results.append((f"SSL Certificate for {NILE_HOSTNAME}", False))
+    
+    # Test HTTPS connectivity and SSL certificates for Amazon S3 from main interface
+    print(f'\nTesting HTTPS for {S3_HOSTNAME} from {ip_addr}...')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', ip_addr,
+                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                 '-H', 'Accept-Language: en-US,en;q=0.5',
+                 f'https://{S3_HOSTNAME}/nile-prod-us-west-2'], capture_output=True, text=True)
+    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
+    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
+    if https_ok:
+        print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        # For 403 errors, it's still a successful connection, just forbidden access
+        if r.stdout.strip() == '403':
+            print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
+            https_ok = True
+        else:
+            print(f'HTTPS {S3_HOSTNAME} from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    test_results.append((f'HTTPS {S3_HOSTNAME} from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity and SSL certificates for Amazon S3 from mgmt1
+    print(f'\nTesting HTTPS for {S3_HOSTNAME} from {mgmt1_ip}...')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', mgmt1_ip,
+                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                 '-H', 'Accept-Language: en-US,en;q=0.5',
+                 f'https://{S3_HOSTNAME}/nile-prod-us-west-2'], capture_output=True, text=True)
+    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
+    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
+    if https_ok:
+        print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        # For 403 errors, it's still a successful connection, just forbidden access
+        if r.stdout.strip() == '403':
+            print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
+            https_ok = True
+        else:
+            print(f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    test_results.append((f'HTTPS {S3_HOSTNAME} from {mgmt1_ip}', https_ok))
+    
+    # Now check the SSL certificate
+    print(f'\nChecking SSL certificate for {S3_HOSTNAME}...')
+    # Use dig to resolve the hostname to IP addresses
+    r = run_cmd(['dig', S3_HOSTNAME, '+short'], capture_output=True, text=True)
+    if r.returncode == 0 and r.stdout.strip():
+        s3_ips = r.stdout.strip().split('\n')
+        print(f"\nResolved {S3_HOSTNAME} to: {', '.join(s3_ips)}")
+        s3_ssl_success = False
+        # Only test the first 2 IPs for S3
+        for ip in s3_ips[:2]:
+            if check_ssl_certificate(ip, S3_HOSTNAME, "Amazon"):
+                s3_ssl_success = True
+                print(f"SSL certificate for {S3_HOSTNAME}: {GREEN}Success{RESET}")
+                break
+            else:
+                print(f"SSL certificate for {S3_HOSTNAME} (IP: {ip}): {RED}Fail{RESET}")
+        test_results.append((f"SSL Certificate for {S3_HOSTNAME}", s3_ssl_success))
+    else:
+        print(f"Could not resolve {S3_HOSTNAME} for SSL check")
+        test_results.append((f"SSL Certificate for {S3_HOSTNAME}", False))
+    
+    # Test HTTPS connectivity for Nile Secure from main interface
+    print(f'\nTesting HTTPS for u1.nilesecure.com from {ip_addr}...')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', ip_addr,
+                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                 '-H', 'Accept-Language: en-US,en;q=0.5',
+                 'https://u1.nilesecure.com'], capture_output=True, text=True)
+    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
+    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
+    if https_ok:
+        print(f'HTTPS u1.nilesecure.com from {ip_addr}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        # For 403 errors, it's still a successful connection, just forbidden access
+        if r.stdout.strip() == '403':
+            print(f'HTTPS u1.nilesecure.com from {ip_addr}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
+            https_ok = True
+        else:
+            print(f'HTTPS u1.nilesecure.com from {ip_addr}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    test_results.append((f'HTTPS u1.nilesecure.com from {ip_addr}', https_ok))
+    
+    # Test HTTPS connectivity for Nile Secure from mgmt1
+    print(f'\nTesting HTTPS for u1.nilesecure.com from {mgmt1_ip}...')
+    r = run_cmd(['curl', '-s', '-o', '/dev/null', '-w', '%{http_code}', 
+                 '--connect-timeout', '10', '--interface', mgmt1_ip,
+                 '-A', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                 '-H', 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                 '-H', 'Accept-Language: en-US,en;q=0.5',
+                 'https://u1.nilesecure.com'], capture_output=True, text=True)
+    # For HTTPS tests, consider 2xx and 3xx as success (redirects are common)
+    https_ok = r.returncode == 0 and (r.stdout.strip().startswith('2') or r.stdout.strip().startswith('3'))
+    if https_ok:
+        print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET} (Status: {r.stdout.strip()})')
+    else:
+        # For 403 errors, it's still a successful connection, just forbidden access
+        if r.stdout.strip() == '403':
+            print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {GREEN}Success{RESET} (Status: 403 Forbidden - connection successful but access denied)')
+            https_ok = True
+        else:
+            print(f'HTTPS u1.nilesecure.com from {mgmt1_ip}: {RED}Fail{RESET} (Status: {r.stdout.strip() if r.stdout else "Connection failed"})')
+    test_results.append((f'HTTPS u1.nilesecure.com from {mgmt1_ip}', https_ok))
+    
+    # UDP Connectivity Check for Guest Access
+    print(f'\n=== UDP Connectivity Check for Guest Access ===')
+    guest_success = False
+    
+    for ip in GUEST_IPS:
+        print(f"Testing UDP connectivity to {ip}:{UDP_PORT}...")
+        if check_udp_connectivity_netcat(ip, UDP_PORT):
+            guest_success = True
+            print(f"UDP connectivity to {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+            break
+        else:
+            print(f"UDP connectivity to {ip}:{UDP_PORT}: {RED}Fail{RESET}")
+    
+    test_results.append(("UDP Connectivity Check for Guest Access", guest_success))
+    
+    
+    return test_results
+
+# Print test summary
+def print_test_summary(test_results):
+    print("\n=== Test Summary ===")
+    success_count = 0
+    total_count = 0
+    
+    # Filter out tests that shouldn't be included in the summary
+    excluded_tests = ["Static Default Route Configuration"]
+    
+    for test_name, result in test_results:
+        # Skip excluded tests
+        if test_name in excluded_tests:
+            continue
+            
+        status = GREEN + "Success" + RESET if result else RED + "Fail" + RESET
+        print(f"{test_name}: {status}")
+        total_count += 1
+        if result:
+            success_count += 1
+    
+    success_rate = (success_count / total_count) * 100 if total_count > 0 else 0
+    print(f"\nOverall: {success_count}/{total_count} tests passed ({success_rate:.1f}%)")
+
+# Main flow
+def main():
+    # Get user input from config file or interactive prompts
+    (test_iface, ip_addr, netmask, gateway, mgmt_interface,
+     mgmt1, mgmt2, client_subnet,
+     dhcp_servers, radius_servers, secret, username, password,
+     run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers) = get_user_input(args.config)
+    
+    # Print summary of custom DNS and NTP servers if provided
+    if custom_dns_servers:
+        print(f"\nWill test custom DNS servers: {', '.join(custom_dns_servers)}")
+    if custom_ntp_servers:
+        print(f"\nWill test custom NTP servers: {', '.join(custom_ntp_servers)}")
+
+    # Record the original state of the interface
+    state = record_state(test_iface)
+    
+    try:
+        # Aggressively reset interfaces - in some cases the interfaces get to a unworkable state after initial boot, this works around this situation
+        print('\nConfiguring Interfaces... (Can take up to 20 seconds)')
+        restore_state(test_iface, state)
+        time.sleep(5)
+        configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
+        add_loopbacks(mgmt1, mgmt2, client_subnet)
+        configure_static_route(gateway, test_iface)
+        time.sleep(5)
+        restore_state(test_iface, state)
+        time.sleep(5)
+
+        # Configure the interface (includes validation and retry logic)
+        interface_up = configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
+        
+        # Add loopbacks
+        add_loopbacks(mgmt1, mgmt2, client_subnet)
+        
+        # Configure static route and verify it was added successfully
+        prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
+        route_added = configure_static_route(gateway, test_iface)
+        
+        # Add the route status to the test results
+        test_results = []
+        test_results.append(("Static Default Route Configuration", route_added))
+
+        # Update scapy's routing table
+        conf.route.resync()
+        
+        # Sniff for OSPF Hello packets
+        up, area, hi, di = sniff_ospf_hello(test_iface)
+        
+        # Configure OSPF
+        configure_ospf(test_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
+        
+        # Check OSPF status
+        ospf_ok = show_ospf_status()
+        print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
+        
+        # Add OSPF test result to the test results list
+        test_results.append(("OSPF Adjacency Test", ospf_ok))
+
+        # Run connectivity tests with the existing test_results list
+        test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers, test_results)
+    
+    finally:
+        # Restore the original state
+        print('\nRestoring original state...')
+        restore_state(test_iface, state)
+        
+        # Print test summary after restoring state
+        if 'test_results' in locals():
+            print_test_summary(test_results)
+
+if __name__=='__main__':
+    if os.geteuid()!=0:
+        print('Must run as root')
+        sys.exit(1)
+    
     main()
