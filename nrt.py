@@ -1612,6 +1612,7 @@ def main():
     try:
 
         # Aggressively reset interfaces - in some cases the interfaces get to a unworkable state after initial boot, this works around this situation
+        print('\nConfiguring Interfaces... (Can take up to 20 seconds)')
         restore_state(test_iface, state)
         time.sleep(5)
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
