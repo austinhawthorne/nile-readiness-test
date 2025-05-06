@@ -894,14 +894,29 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
         print("Current routing table:")
         print(route_output)
     
-    # Check connectivity to the upstream router
+    # Check connectivity to the upstream router with retry logic
     print(f"Testing connectivity to upstream router {up}")
-    ping_result = run_cmd(['ping', '-c', '4', up], capture_output=True)
-    if ping_result.returncode == 0:
-        print(f"Connectivity to upstream router {up}: {GREEN}Success{RESET}")
-    else:
-        print(f"Connectivity to upstream router {up}: {RED}Fail{RESET}")
-        print("Warning: OSPF may not work correctly without connectivity to the upstream router")
+    max_retries = 3
+    retry_delay = 5
+    router_reachable = False
+    
+    for attempt in range(max_retries):
+        ping_result = run_cmd(['ping', '-c', '4', up], capture_output=True)
+        if ping_result.returncode == 0:
+            router_reachable = True
+            print(f"Connectivity to upstream router {up}: {GREEN}Success{RESET}")
+            break
+        else:
+            print(f"Attempt {attempt+1}/{max_retries}: Connectivity to upstream router {up}: {RED}Fail{RESET}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+    
+    if not router_reachable:
+        print(f"{RED}ERROR: Failed to reach upstream router {up} after {max_retries} attempts.{RESET}")
+        print(f"{RED}There is no reason to continue tests without upstream router connectivity.{RESET}")
+        print(f"{RED}Terminating tests...{RESET}")
+        sys.exit(1)
     
     print("OSPF configuration complete")
 
@@ -1018,22 +1033,40 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     ping_ok = dns_ok = False
     print(f'\nInitial Ping Tests from {ip_addr}:')
     
-    # Test default DNS servers
+    # Test default DNS servers with retry logic
     for tgt in dns_servers:
+        # First attempt
         r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
         result = r.returncode == 0
-        print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+        
+        # If first attempt fails, retry once more
+        if not result:
+            print(f'Ping {tgt} from {ip_addr}: {RED}Fail{RESET} (First attempt)')
+            print(f'Retrying ping to {tgt}...')
+            r = run_cmd(['ping', '-c', '3', '-I', ip_addr, tgt], capture_output=True)  # Try with more pings
+            result = r.returncode == 0
+        
+        print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail{RESET} (After retry)'))
         test_results.append((f'Initial Ping {tgt} from {ip_addr}', result))
         ping_ok |= result
     
-    # Test custom DNS servers if provided
+    # Test custom DNS servers if provided (with retry logic)
     if custom_dns_servers:
         print(f'\nCustom DNS Server Ping Tests from {ip_addr}:')
         custom_ping_ok = False
         for tgt in custom_dns_servers:
+            # First attempt
             r = run_cmd(['ping', '-c', '2', '-I', ip_addr, tgt], capture_output=True)
             result = r.returncode == 0
-            print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail'+RESET))
+            
+            # If first attempt fails, retry once more
+            if not result:
+                print(f'Ping {tgt} from {ip_addr}: {RED}Fail{RESET} (First attempt)')
+                print(f'Retrying ping to {tgt}...')
+                r = run_cmd(['ping', '-c', '3', '-I', ip_addr, tgt], capture_output=True)  # Try with more pings
+                result = r.returncode == 0
+            
+            print(f'Ping {tgt} from {ip_addr}: ' + (GREEN+'Success'+RESET if result else RED+'Fail{RESET} (After retry)'))
             test_results.append((f'Initial Ping Custom DNS {tgt} from {ip_addr}', result))
             custom_ping_ok |= result
         
