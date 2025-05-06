@@ -608,7 +608,8 @@ def record_state(iface):
     return state
 
 def restore_state(iface, state):
-    print('\nRestoring original state...')
+    if DEBUG:
+        print('\nRestoring original state...')
     
     # First, remove dummy interfaces
     if DEBUG:
@@ -1653,6 +1654,7 @@ def main():
     
     finally:
         # Restore the original state
+        print('\nRestoring original state...')
         restore_state(test_iface, state)
         
         # Print test summary after restoring state
