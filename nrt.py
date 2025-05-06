@@ -1612,7 +1612,6 @@ def main():
     try:
 
         # Aggressively reset interfaces - in some cases the interfaces get to a unworkable state after initial boot, this works around this situation
-        configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         restore_state(test_iface, state)
         time.sleep(5)
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
@@ -1620,6 +1619,7 @@ def main():
         configure_static_route(gateway, test_iface)
         time.sleep(5)
         restore_state(test_iface, state)
+        time.sleep(5)
 
         # Configure the interface (includes validation and retry logic)
         interface_up = configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
