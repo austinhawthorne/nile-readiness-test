@@ -32,11 +32,8 @@ from scapy.config import conf
 from scapy.all import sniff, sr1, send, Raw
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
-try:
-    from scapy.contrib.geneve import GENEVE
-except ImportError:
-    print("Warning: Scapy Geneve module not available. Geneve testing will be limited.")
-    GENEVE = None
+from scapy.contrib.geneve import GENEVE
+
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
 import dhcppython.options as dhcp_options
@@ -45,7 +42,6 @@ import dhcppython.utils as dhcp_utils
 # Constants for Nile Connect tests
 NILE_HOSTNAME = "ne-u1.nile-global.cloud"
 S3_HOSTNAME = "s3.us-west-2.amazonaws.com"
-GOOGLE_DNS = "8.8.8.8"
 GUEST_IPS = ["145.40.90.203","145.40.64.129","145.40.113.105","147.28.179.61"]
 UDP_PORT = 6081
 SSL_PORT = 443
@@ -65,15 +61,11 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
     Returns:
         bool: True if Geneve is detected, False otherwise
     """
-    if GENEVE is None:
-        print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
-        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
-        return check_udp_connectivity_netcat(ip, port, timeout)
-        
+     
     try:
         # Create a Geneve packet
         # VNI (Virtual Network Identifier) is a 24-bit value
-        vni = 35762  # Example VNI
+        vni = 3762  # Example VNI
         sport = 12345  # Source port
         
         # Craft the packet
