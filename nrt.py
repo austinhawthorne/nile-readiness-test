@@ -96,7 +96,7 @@ def send_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, vni: int =
         return False, None
 
 # Sniff for Geneve packets
-def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10, sport: int = 12345) -> tuple:
+def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10, sport: int = 12345, iface: str = None) -> tuple:
     """
     Sniff for Geneve packets from a specific source
     
@@ -106,6 +106,7 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
         port: UDP port to filter for (default: 6081)
         timeout: Sniffing timeout in seconds (default: 10)
         sport: Source port we used when sending (default: 12345)
+        iface: Interface to sniff on (default: None, which uses scapy's default)
         
     Returns:
         tuple: (success, packet) where success is a boolean indicating if a Geneve packet was detected
@@ -119,12 +120,41 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
         # Create a filter for UDP packets from the target IP to our source port
         filter_str = f"udp and src host {ip} and dst port {sport}"
         
-        print(f"  Sniffing for Geneve responses from {ip} (timeout: {timeout}s)")
+        # Get the list of available interfaces
+        available_interfaces = conf.ifaces.keys()
+        if DEBUG:
+            print(f"DEBUG: Available interfaces: {', '.join(available_interfaces)}")
+        
+        # If no interface specified, try to determine the best one
+        if iface is None:
+            # Try to use the interface that has the source_ip
+            for i in conf.ifaces.values():
+                if hasattr(i, 'ip') and i.ip == source_ip:
+                    iface = i.name
+                    if DEBUG:
+                        print(f"DEBUG: Found interface {iface} with IP {source_ip}")
+                    break
+        
+        print(f"  Sniffing for Geneve responses from {ip} on interface {iface or 'default'} (timeout: {timeout}s)")
         if DEBUG:
             print(f"DEBUG: Using filter: {filter_str}")
             
         # Sniff for packets
-        packets = sniff(filter=filter_str, timeout=timeout, count=1)
+        try:
+            if iface:
+                packets = sniff(iface=iface, filter=filter_str, timeout=timeout, count=1)
+            else:
+                packets = sniff(filter=filter_str, timeout=timeout, count=1)
+        except OSError as ose:
+            if "Network is down" in str(ose):
+                print(f"  Error: Network is down on interface {iface or 'default'}")
+                print(f"  Troubleshooting:")
+                print(f"    - Check if the interface is up (ip link show)")
+                print(f"    - Try using a different interface")
+                print(f"    - Verify network connectivity")
+                return False, None
+            else:
+                raise
         
         if not packets:
             print(f"  No response received from {ip}:{port} within {timeout} seconds")
@@ -166,6 +196,10 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
         return False, response
     except Exception as e:
         print(f"  Error sniffing for Geneve packets: {e}")
+        print(f"  Troubleshooting:")
+        print(f"    - Check if the interface is up and has proper IP configuration")
+        print(f"    - Verify you have permission to sniff packets (run as root/sudo)")
+        print(f"    - Try using a different interface")
         if DEBUG:
             import traceback
             traceback.print_exc()
@@ -190,13 +224,22 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
         print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
         return check_udp_connectivity_netcat(ip, port, timeout)
     
+    # Get the interface name from the IP address
+    iface_name = None
+    for i in conf.ifaces.values():
+        if hasattr(i, 'ip') and i.ip == source_ip:
+            iface_name = i.name
+            if DEBUG:
+                print(f"DEBUG: Found interface {iface_name} with IP {source_ip}")
+            break
+    
     # First send the packet
     send_success, pkt = send_geneve_packet(ip, source_ip, port)
     if not send_success:
         return False
     
-    # Then sniff for a response
-    sniff_success, response = sniff_geneve_packet(ip, source_ip, port, timeout)
+    # Then sniff for a response - explicitly pass the interface
+    sniff_success, response = sniff_geneve_packet(ip, source_ip, port, timeout, sport=12345, iface=iface_name)
     
     # Return True if we detected Geneve
     return sniff_success
@@ -1335,9 +1378,9 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
             if send_success:
                 print(f"Successfully sent Geneve packet to {ip}:{UDP_PORT}")
                 
-                # Then sniff for a response
-                print(f"Step 2: Sniffing for Geneve response from {ip}:{UDP_PORT}...")
-                sniff_success, response = sniff_geneve_packet(ip, ip_addr, UDP_PORT)
+                # Then sniff for a response - explicitly use the test interface
+                print(f"Step 2: Sniffing for Geneve response from {ip}:{UDP_PORT} on interface {iface}...")
+                sniff_success, response = sniff_geneve_packet(ip, ip_addr, UDP_PORT, timeout=10, sport=12345, iface=iface)
                 
                 if sniff_success:
                     geneve_success = True
