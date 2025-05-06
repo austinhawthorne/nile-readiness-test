@@ -1616,6 +1616,8 @@ def main():
         restore_state(test_iface, state)
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         add_loopbacks(mgmt1, mgmt2, client_subnet)
+        prefix = ipaddress.IPv4Network(f'0.0.0.0/{netmask}').prefixlen
+        route_added = configure_static_route(gateway, test_iface)
         configure_ospf(test_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
         restore_state(test_iface, state)
 
