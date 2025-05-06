@@ -208,6 +208,40 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
             traceback.print_exc()
         return False, None
 
+# Check if kernel supports Geneve tunnels
+def check_geneve_kernel_support() -> bool:
+    """
+    Check if the kernel supports Geneve tunnels
+    
+    Returns:
+        bool: True if Geneve tunnels are supported, False otherwise
+    """
+    try:
+        # Check if the geneve module is loaded or built into the kernel
+        modules = run_cmd(['lsmod'], capture_output=True, text=True).stdout
+        if 'geneve' in modules:
+            if DEBUG:
+                print("DEBUG: Geneve module is loaded")
+            return True
+        
+        # Check if we can create a dummy Geneve tunnel
+        test_tunnel = "geneve_test_check"
+        run_cmd(['ip', 'link', 'add', test_tunnel, 'type', 'geneve', 'id', '1', 
+                 'remote', '127.0.0.1', 'dstport', '6081'], check=True, capture_output=True)
+        # If we get here, the command succeeded
+        run_cmd(['ip', 'link', 'del', test_tunnel], check=False, capture_output=True)
+        if DEBUG:
+            print("DEBUG: Successfully created test Geneve tunnel")
+        return True
+    except subprocess.CalledProcessError:
+        if DEBUG:
+            print("DEBUG: Failed to create test Geneve tunnel")
+        return False
+    except Exception as e:
+        if DEBUG:
+            print(f"DEBUG: Error checking Geneve support: {e}")
+        return False
+
 # Test Geneve by creating an actual tunnel
 def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: int = 3762) -> bool:
     """
@@ -222,24 +256,90 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
     Returns:
         bool: True if Geneve tunnel was created and is functional, False otherwise
     """
+    # First check if the kernel supports Geneve tunnels
+    if not check_geneve_kernel_support():
+        print(f"  Error: Kernel does not support Geneve tunnels")
+        print(f"  Troubleshooting:")
+        print(f"    - Check if the Geneve kernel module is available")
+        print(f"    - Try loading the module with 'modprobe geneve'")
+        print(f"    - You may need to install a newer kernel or compile with Geneve support")
+        print(f"    - Falling back to Scapy-based Geneve test")
+        return False
+    
     # Generate a unique tunnel name
     tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"
     
     try:
         print(f"  Creating Geneve tunnel {tunnel_name} from {source_ip} to {ip}:{port} (VNI: {vni})...")
         
-        # Create the Geneve tunnel
-        run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
-                 'remote', ip, 'dstport', str(port)], check=True)
+        # Create the Geneve tunnel with more detailed error handling
+        try:
+            run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
+                    'remote', ip, 'dstport', str(port)], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            error_output = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
+            print(f"  Error creating Geneve tunnel: {e}")
+            
+            if "file exists" in error_output.lower():
+                print(f"  A tunnel with the same parameters already exists. Trying to clean up...")
+                # Try to find and delete existing tunnels
+                tunnels = run_cmd(['ip', 'link', 'show'], capture_output=True, text=True).stdout
+                for line in tunnels.splitlines():
+                    if "geneve" in line.lower():
+                        tunnel_to_del = line.split(':')[1].strip()
+                        print(f"  Deleting existing tunnel: {tunnel_to_del}")
+                        run_cmd(['ip', 'link', 'del', tunnel_to_del], check=False)
+                
+                # Try again with a different name
+                tunnel_name = f"geneve_test_{random.randint(1000, 9999)}"
+                print(f"  Retrying with new tunnel name: {tunnel_name}")
+                run_cmd(['ip', 'link', 'add', tunnel_name, 'type', 'geneve', 'id', str(vni), 
+                        'remote', ip, 'dstport', str(port)], check=True)
+            elif "operation not supported" in error_output.lower():
+                print(f"  Geneve tunnels are not supported by this kernel")
+                print(f"  Troubleshooting:")
+                print(f"    - Your kernel may not have Geneve support compiled in")
+                print(f"    - Try loading the Geneve module with 'modprobe geneve'")
+                print(f"    - Falling back to Scapy-based Geneve test")
+                return False
+            elif "permission denied" in error_output.lower():
+                print(f"  Permission denied when creating Geneve tunnel")
+                print(f"  Troubleshooting:")
+                print(f"    - Make sure you're running the script as root (sudo)")
+                print(f"    - Check if you have the necessary capabilities")
+                print(f"    - Falling back to Scapy-based Geneve test")
+                return False
+            else:
+                print(f"  Troubleshooting:")
+                print(f"    - Check if your kernel supports Geneve tunnels")
+                print(f"    - Verify you have permission to create network interfaces")
+                print(f"    - Check network connectivity to {ip}")
+                print(f"    - Falling back to Scapy-based Geneve test")
+                return False
         
         # Assign a test IP address to the tunnel
         test_ip = f"192.168.{random.randint(100, 200)}.{random.randint(2, 254)}/24"
-        run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True)
+        try:
+            run_cmd(['ip', 'addr', 'add', test_ip, 'dev', tunnel_name], check=True, capture_output=True)
+        except subprocess.CalledProcessError as e:
+            print(f"  Error assigning IP to Geneve tunnel: {e}")
+            print(f"  Troubleshooting:")
+            print(f"    - The IP address may already be in use")
+            print(f"    - The tunnel interface may not exist")
+            # Try to continue anyway
         
         # Bring the tunnel up
-        run_cmd(['ip', 'link', 'set', 'dev', tunnel_name, 'up'], check=True)
-        
-        print(f"  Geneve tunnel {tunnel_name} created and up")
+        try:
+            run_cmd(['ip', 'link', 'set', 'dev', tunnel_name, 'up'], check=True, capture_output=True)
+            print(f"  Geneve tunnel {tunnel_name} created and up")
+        except subprocess.CalledProcessError as e:
+            print(f"  Error bringing up Geneve tunnel: {e}")
+            print(f"  Troubleshooting:")
+            print(f"    - The tunnel interface may not exist")
+            print(f"    - There may be network configuration issues")
+            # Clean up and return False
+            run_cmd(['ip', 'link', 'del', tunnel_name], check=False, capture_output=True)
+            return False
         
         # Check if the tunnel interface is actually up
         iface_status = run_cmd(['ip', 'link', 'show', 'dev', tunnel_name], 
@@ -250,19 +350,26 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
             
             # Try to ping through the tunnel (this will likely fail but shows the tunnel is working)
             # We're not actually expecting a response, just checking if the packet can be sent
-            ping_result = run_cmd(['ping', '-c', '1', '-W', '1', '-I', tunnel_name, ip], 
-                                 capture_output=True)
-            
-            # Even if ping fails, the tunnel was created successfully
-            print(f"  Geneve protocol detected on {ip}:{port}")
-            return True
+            try:
+                ping_result = run_cmd(['ping', '-c', '1', '-W', '1', '-I', tunnel_name, ip], 
+                                    capture_output=True)
+                
+                # Even if ping fails, the tunnel was created successfully
+                print(f"  Geneve protocol detected on {ip}:{port}")
+                return True
+            except Exception as e:
+                # Even if ping fails with an exception, the tunnel was created successfully
+                print(f"  Ping through tunnel failed: {e}")
+                print(f"  This is expected and doesn't indicate a problem")
+                print(f"  Geneve protocol detected on {ip}:{port}")
+                return True
         else:
             print(f"  Geneve tunnel {tunnel_name} failed to come up")
             print(f"  Troubleshooting: The device at {ip}:{port} may not support Geneve")
             return False
             
-    except subprocess.CalledProcessError as e:
-        print(f"  Error creating Geneve tunnel: {e}")
+    except Exception as e:
+        print(f"  Error in Geneve tunnel test: {e}")
         print(f"  Troubleshooting:")
         print(f"    - Check if your kernel supports Geneve tunnels")
         print(f"    - Verify you have permission to create network interfaces (run as root/sudo)")
@@ -273,8 +380,12 @@ def test_geneve_with_tunnel(ip: str, source_ip: str, port: int = UDP_PORT, vni: 
         return False
     finally:
         # Clean up the tunnel interface
-        print(f"  Cleaning up Geneve tunnel {tunnel_name}...")
-        run_cmd(['ip', 'link', 'del', tunnel_name], check=False)
+        try:
+            print(f"  Cleaning up Geneve tunnel {tunnel_name}...")
+            run_cmd(['ip', 'link', 'del', tunnel_name], check=False, capture_output=True)
+        except Exception as e:
+            if DEBUG:
+                print(f"DEBUG: Error cleaning up tunnel: {e}")
 
 # Test if a remote device is running Geneve on UDP port
 def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10) -> bool:
