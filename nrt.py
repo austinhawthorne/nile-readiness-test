@@ -1639,8 +1639,8 @@ def main():
         # Add OSPF test result to the test results list
         test_results.append(("OSPF Adjacency Test", ospf_ok))
 
-
-
+        # Update scapy's routing table
+        conf.route.resync()
 
         # Run connectivity tests with the existing test_results list
         test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers, test_results)
