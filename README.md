@@ -24,6 +24,7 @@ Running this script will test:
 - UDP Connectivity Check for Guest Access
     - Will test UDP connectivity to Guest Access servers on port 6081
     - Will test for Geneve protocol support on UDP port 6081 using Scapy
+    - Provides detailed troubleshooting information for Geneve protocol testing
 - Additional DNS Resolution Checks
     - Will test DNS resolution using Google DNS from the NSB Subnet IP Address
     - Will use any custom DNS servers provided during initial DNS tests
@@ -123,6 +124,7 @@ sudo ./nrt.py
 - The FRR test script will restore the original state of the interface when it completes or if an error occurs
 - The nrt.py script now provides a comprehensive test summary at the end of execution, after restoring the system state
 - The DHCP testing has been improved to use the dhcppython library instead of scapy for more reliable DHCP relay testing
+- The Geneve protocol testing includes detailed troubleshooting guidance for common issues
 - Only tested on Raspberry Pi, should run on any debian based distribution.
 
 ## Dependencies Details
@@ -130,6 +132,7 @@ sudo ./nrt.py
 ### Python Dependencies
 
 - **scapy**: Used for OSPF packet sniffing and Geneve protocol testing
+  - Version 2.4.3+ recommended for Geneve protocol support
 - **dhcppython**: Used for DHCP relay testing (must be installed via pip3)
 - **socket**: Used for hostname resolution and SSL connectivity testing
 - **re**: Used for IP address validation

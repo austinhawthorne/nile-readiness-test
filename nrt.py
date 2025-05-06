@@ -67,6 +67,7 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
     """
     if GENEVE is None:
         print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
+        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
         return check_udp_connectivity_netcat(ip, port, timeout)
         
     try:
@@ -78,27 +79,56 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
         # Craft the packet
         pkt = IP(src=source_ip, dst=ip)/UDP(sport=sport, dport=port)/GENEVE(vni=vni)/Raw(load="Geneve probe")
         
+        print(f"  Sending Geneve probe from {source_ip} to {ip}:{port} (VNI: {vni})")
         if DEBUG:
-            print(f"DEBUG: Sending Geneve probe to {ip}:{port}")
+            print(f"DEBUG: Packet details: {pkt.summary()}")
+            print(f"DEBUG: Packet layers: {[layer.name for layer in pkt.layers()]}")
             
         # Send the packet and wait for response
         response = sr1(pkt, timeout=timeout, verbose=0)
         
         # Analyze the response
-        if response and UDP in response and response[UDP].dport == sport:
-            if GENEVE in response:
-                print(f"  Geneve detected on {ip}:{port}")
-                return True
+        if response:
+            print(f"  Received response from {ip}:{port}")
+            if DEBUG:
+                print(f"DEBUG: Response summary: {response.summary()}")
+                print(f"DEBUG: Response layers: {[layer.name for layer in response.layers()]}")
+            
+            if UDP in response and response[UDP].dport == sport:
+                if GENEVE in response:
+                    print(f"  Geneve protocol detected on {ip}:{port}")
+                    if DEBUG:
+                        geneve_resp = response[GENEVE]
+                        print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
+                        print(f"DEBUG: Geneve version: {geneve_resp.ver}")
+                    return True
+                else:
+                    print(f"  Response received from {ip}:{port}, but not Geneve protocol")
+                    print(f"  Troubleshooting: The device at {ip}:{port} is responding on UDP but not with Geneve protocol")
+                    print(f"  Possible causes:")
+                    print(f"    - The device is not running Geneve")
+                    print(f"    - The device is using a different VNI (tried: {vni})")
+                    print(f"    - The device requires authentication or specific headers")
+                    if DEBUG:
+                        print(f"DEBUG: Response payload: {response.summary()}")
             else:
-                print(f"  Response received from {ip}:{port}, but not Geneve")
-                if DEBUG:
-                    print(f"DEBUG: Response: {response.summary()}")
+                print(f"  Response received but not directed to our source port")
+                print(f"  Troubleshooting: Check firewall rules and NAT configurations")
         else:
-            print(f"  No Geneve response from {ip}:{port}")
+            print(f"  No response received from {ip}:{port} within {timeout} seconds")
+            print(f"  Troubleshooting:")
+            print(f"    - Verify the target IP is correct and reachable (try ping {ip})")
+            print(f"    - Check if UDP port {port} is open (try 'nc -vzu {ip} {port}')")
+            print(f"    - Verify no firewall is blocking UDP traffic to port {port}")
+            print(f"    - Try increasing the timeout value")
             
         return False
     except Exception as e:
         print(f"  Error testing Geneve: {e}")
+        print(f"  Troubleshooting:")
+        print(f"    - Check network connectivity to {ip}")
+        print(f"    - Verify source IP {source_ip} is correctly configured on your interface")
+        print(f"    - Check if you have permission to send raw packets (run as root/sudo)")
         if DEBUG:
             import traceback
             traceback.print_exc()
