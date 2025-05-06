@@ -23,6 +23,7 @@ Running this script will test:
     - Will verify SSL certificates for Nile Cloud and Amazon S3
 - UDP Connectivity Check for Guest Access
     - Will test UDP connectivity to Guest Access servers on port 6081
+    - Will test for Geneve protocol support on UDP port 6081 using Scapy
 - Additional DNS Resolution Checks
     - Will test DNS resolution using Google DNS from the NSB Subnet IP Address
     - Will use any custom DNS servers provided during initial DNS tests
@@ -37,7 +38,7 @@ Running this script will test:
 - Linux system with network namespace support
 - FRR (Free Range Routing) installed
 - Python 3.6+ with required packages:
-  - scapy
+  - scapy (with contrib.geneve module for enhanced Geneve testing)
   - ipaddress
   - dhcppython
 - Required utilities:
@@ -128,7 +129,7 @@ sudo ./nrt.py
 
 ### Python Dependencies
 
-- **scapy**: Used for OSPF packet sniffing
+- **scapy**: Used for OSPF packet sniffing and Geneve protocol testing
 - **dhcppython**: Used for DHCP relay testing (must be installed via pip3)
 - **socket**: Used for hostname resolution and SSL connectivity testing
 - **re**: Used for IP address validation

@@ -29,9 +29,14 @@ import argparse
 import re
 from urllib.parse import urlparse
 from scapy.config import conf
-from scapy.all import sniff
-from scapy.layers.inet import IP
+from scapy.all import sniff, sr1, send, Raw
+from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
+try:
+    from scapy.contrib.geneve import GENEVE
+except ImportError:
+    print("Warning: Scapy Geneve module not available. Geneve testing will be limited.")
+    GENEVE = None
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
 import dhcppython.options as dhcp_options
@@ -45,6 +50,59 @@ GUEST_IPS = ["145.40.90.203","145.40.64.129","145.40.113.105","147.28.179.61"]
 UDP_PORT = 6081
 SSL_PORT = 443
 
+
+# Test if a remote device is running Geneve on UDP port
+def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 3) -> bool:
+    """
+    Test if a target is running Geneve on UDP port (default 6081) using Scapy
+    
+    Args:
+        ip: Target IP address to test
+        source_ip: Source IP to use for the packet
+        port: UDP port to test (default: 6081)
+        timeout: Response timeout in seconds (default: 3)
+        
+    Returns:
+        bool: True if Geneve is detected, False otherwise
+    """
+    if GENEVE is None:
+        print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
+        return check_udp_connectivity_netcat(ip, port, timeout)
+        
+    try:
+        # Create a Geneve packet
+        # VNI (Virtual Network Identifier) is a 24-bit value
+        vni = 1  # Example VNI
+        sport = 12345  # Source port
+        
+        # Craft the packet
+        pkt = IP(src=source_ip, dst=ip)/UDP(sport=sport, dport=port)/GENEVE(vni=vni)/Raw(load="Geneve probe")
+        
+        if DEBUG:
+            print(f"DEBUG: Sending Geneve probe to {ip}:{port}")
+            
+        # Send the packet and wait for response
+        response = sr1(pkt, timeout=timeout, verbose=0)
+        
+        # Analyze the response
+        if response and UDP in response and response[UDP].dport == sport:
+            if GENEVE in response:
+                print(f"  Geneve detected on {ip}:{port}")
+                return True
+            else:
+                print(f"  Response received from {ip}:{port}, but not Geneve")
+                if DEBUG:
+                    print(f"DEBUG: Response: {response.summary()}")
+        else:
+            print(f"  No Geneve response from {ip}:{port}")
+            
+        return False
+    except Exception as e:
+        print(f"  Error testing Geneve: {e}")
+        if DEBUG:
+            import traceback
+            traceback.print_exc()
+        return False
 
 # Check UDP connectivity using netcat
 def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
@@ -1162,15 +1220,29 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     # UDP Connectivity Check for Guest Access
     print(f'\n=== UDP Connectivity Check for Guest Access ===')
     guest_success = False
+    geneve_success = False
+    
     for ip in GUEST_IPS:
         print(f"Testing UDP connectivity to {ip}:{UDP_PORT}...")
         if check_udp_connectivity_netcat(ip, UDP_PORT):
             guest_success = True
             print(f"UDP connectivity to {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+            
+            # If basic UDP connectivity succeeds, try Geneve test
+            print(f"Testing Geneve protocol on {ip}:{UDP_PORT}...")
+            if test_geneve_with_scapy(ip, ip_addr, UDP_PORT):
+                geneve_success = True
+                print(f"Geneve protocol on {ip}:{UDP_PORT}: {GREEN}Success{RESET}")
+            else:
+                print(f"Geneve protocol on {ip}:{UDP_PORT}: {RED}Fail{RESET}")
+            
             break
         else:
             print(f"UDP connectivity to {ip}:{UDP_PORT}: {RED}Fail{RESET}")
+    
     test_results.append(("UDP Connectivity Check for Guest Access", guest_success))
+    if guest_success:  # Only add Geneve test result if UDP connectivity succeeded
+        test_results.append(("Geneve Protocol Check for Guest Access", geneve_success))
     
     
     return test_results
