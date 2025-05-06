@@ -1611,7 +1611,7 @@ def main():
     
     try:
 
-        # Reset interfaces - in some cases the loopback interface get to a unworkable state after initial boot, this works around this situation
+        # Aggressively reset interfaces - in some cases the interfaces get to a unworkable state after initial boot, this works around this situation
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         restore_state(test_iface, state)
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
