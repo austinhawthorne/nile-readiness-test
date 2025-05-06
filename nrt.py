@@ -1528,11 +1528,19 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 def print_test_summary(test_results):
     print("\n=== Test Summary ===")
     success_count = 0
-    total_count = len(test_results)
+    total_count = 0
+    
+    # Filter out tests that shouldn't be included in the summary
+    excluded_tests = ["Static Default Route Configuration"]
     
     for test_name, result in test_results:
+        # Skip excluded tests
+        if test_name in excluded_tests:
+            continue
+            
         status = GREEN + "Success" + RESET if result else RED + "Fail" + RESET
         print(f"{test_name}: {status}")
+        total_count += 1
         if result:
             success_count += 1
     
@@ -1583,6 +1591,9 @@ def main():
         # Check OSPF status
         ospf_ok = show_ospf_status()
         print("OSPF adjacency test: " + (GREEN+'Success'+RESET if ospf_ok else RED+'Fail'+RESET))
+        
+        # Add OSPF test result to the test results list
+        test_results.append(("OSPF Adjacency Test", ospf_ok))
 
 
 
