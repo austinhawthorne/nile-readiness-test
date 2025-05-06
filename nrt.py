@@ -45,9 +45,6 @@ GUEST_IPS = ["145.40.90.203","145.40.64.129","145.40.113.105","147.28.179.61"]
 UDP_PORT = 6081
 SSL_PORT = 443
 
-
-# Check UDP connectivity using netcat
-
 # Check UDP connectivity using netcat
 def check_udp_connectivity_netcat(ip: str, port: int = UDP_PORT, timeout: int = 5) -> bool:
     """
@@ -126,6 +123,12 @@ def check_ssl_certificate(ip: str, hostname: str, expected_org: str) -> bool:
 
 # Parse command line arguments
 def parse_args():
+    """
+    Parse command line arguments for the Nile Readiness Test.
+    
+    Returns:
+        argparse.Namespace: Parsed command line arguments
+    """
     parser = argparse.ArgumentParser(description='Nile Readiness Test')
     parser.add_argument('--debug', action='store_true', help='Enable debug output')
     parser.add_argument('--config', type=str, help='Path to JSON configuration file')
@@ -133,6 +136,18 @@ def parse_args():
 
 # Read configuration from JSON file
 def read_config(config_file):
+    """
+    Read and parse the JSON configuration file.
+    
+    Args:
+        config_file: Path to the JSON configuration file
+        
+    Returns:
+        dict: Parsed configuration data
+        
+    Raises:
+        SystemExit: If the file cannot be read or parsed
+    """
     try:
         with open(config_file, 'r') as f:
             config = json.load(f)
@@ -173,6 +188,21 @@ if missing:
 
 # Wrapper for subprocess.run with debug
 def run_cmd(cmd, **kwargs):
+    """
+    Execute a command with improved handling of output capture and debugging.
+    
+    This function wraps subprocess.run with additional features:
+    - Debug output of commands being executed
+    - Improved handling of stdout/stderr to avoid buffer deadlocks
+    - Consistent error handling
+    
+    Args:
+        cmd: Command to execute (list or string)
+        **kwargs: Additional arguments to pass to subprocess.run
+        
+    Returns:
+        subprocess.CompletedProcess: Result of the command execution
+    """
     if DEBUG:
         printed = cmd if isinstance(cmd, str) else ' '.join(cmd)
         print(f'DEBUG: Running: {printed} | kwargs={kwargs}')
@@ -247,6 +277,15 @@ def run_cmd(cmd, **kwargs):
 
 # Prompt helper
 def prompt_nonempty(prompt):
+    """
+    Prompt the user for input and ensure a non-empty response.
+    
+    Args:
+        prompt: The prompt text to display to the user
+        
+    Returns:
+        str: The user's non-empty input
+    """
     while True:
         val = input(prompt).strip()
         if val:
@@ -255,6 +294,22 @@ def prompt_nonempty(prompt):
 
 # Gather user input
 def get_user_input(config_file=None):
+    """
+    Gather network configuration input from either a config file or interactive prompts.
+    
+    This function handles both configuration file parsing and interactive user input
+    for setting up network interfaces, subnets, and test parameters.
+    
+    Args:
+        config_file: Optional path to a JSON configuration file
+        
+    Returns:
+        tuple: A tuple containing all configuration parameters:
+            (test_iface, ip_addr, netmask, gateway, mgmt_interface,
+            mgmt1, mgmt2, client_subnet,
+            dhcp_servers, radius_servers, secret, username, password,
+            run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers)
+    """
     # If config file is provided, use it
     if config_file:
         config = read_config(config_file)
@@ -396,6 +451,19 @@ def get_user_input(config_file=None):
 
 # Record/restore host state
 def record_state(iface):
+    """
+    Record the current state of a network interface and system configuration.
+    
+    This function captures the current state of the specified interface,
+    including IP addresses, routes, FRR configuration, and DNS settings,
+    so they can be restored later.
+    
+    Args:
+        iface: The network interface to record state for
+        
+    Returns:
+        dict: A dictionary containing the recorded state information
+    """
     if DEBUG:
         print(f"Recording state of interface {iface}...")
     state = {}
@@ -409,6 +477,21 @@ def record_state(iface):
     return state
 
 def restore_state(iface, state):
+    """
+    Restore the network interface and system configuration to its original state.
+    
+    This function reverses the changes made during testing by:
+    - Removing dummy interfaces
+    - Restoring original IP addresses
+    - Restoring original routes
+    - Restoring FRR configuration
+    - Restoring DNS settings
+    - Stopping and disabling FRR service
+    
+    Args:
+        iface: The network interface to restore
+        state: The state dictionary created by record_state()
+    """
     if DEBUG:
         print('\nRestoring original state...')
     
@@ -470,6 +553,23 @@ def restore_state(iface, state):
 
 # Configure main interface
 def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
+    """
+    Configure the main network interface for testing.
+    
+    This function:
+    - Disables all interfaces except loopback and management interface
+    - Configures the specified interface with the given IP address and netmask
+    - Ensures the interface is up and properly configured
+    
+    Args:
+        iface: The network interface to configure
+        ip_addr: The IP address to assign to the interface
+        netmask: The netmask in dotted decimal notation (e.g., 255.255.255.0)
+        mgmt_interface: The management interface to keep enabled (default: end0)
+        
+    Returns:
+        bool: True if the interface was successfully configured, False otherwise
+    """
 
     if DEBUG:
         print(f'Configuring {iface} → {ip_addr}/{netmask}')
@@ -604,6 +704,21 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
 
 # Add loopbacks
 def add_loopbacks(m1,m2,client):
+    """
+    Create dummy loopback interfaces for each subnet.
+    
+    This function creates three dummy interfaces:
+    - dummy_mgmt1: For the NSB subnet
+    - dummy_mgmt2: For the sensor subnet
+    - dummy_client: For the client subnet
+    
+    Each interface is assigned the first IP address in its respective subnet.
+    
+    Args:
+        m1: NSB subnet in CIDR notation
+        m2: Sensor subnet in CIDR notation
+        client: Client subnet in CIDR notation
+    """
     for name,subnet in [('mgmt1',m1),('mgmt2',m2),('client',client)]:
         net = ipaddress.IPv4Network(subnet)
         iface = f'dummy_{name}'
@@ -617,6 +732,22 @@ def add_loopbacks(m1,m2,client):
 
 # OSPF Hello sniff
 def sniff_ospf_hello(iface, timeout=60):
+    """
+    Sniff for OSPF Hello packets on the specified interface.
+    
+    This function waits for an OSPF Hello packet on the specified interface
+    and extracts the source IP, area, hello interval, and dead interval.
+    
+    Args:
+        iface: The network interface to sniff on
+        timeout: Maximum time to wait for an OSPF Hello packet in seconds (default: 60)
+        
+    Returns:
+        tuple: (source_ip, area, hello_interval, dead_interval)
+        
+    Raises:
+        SystemExit: If no OSPF Hello packet is received within the timeout
+    """
     print(f'\nWaiting for OSPF Hello on {iface}...')
     
     # Use scapy to sniff for OSPF Hello packets
@@ -638,6 +769,30 @@ def sniff_ospf_hello(iface, timeout=60):
 
 # Configure OSPF - using vtysh commands directly like the original
 def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
+    """
+    Configure OSPF routing using FRR.
+    
+    This function:
+    - Enables the OSPF daemon in FRR
+    - Configures OSPF networks and parameters
+    - Verifies the interface is up and properly configured
+    - Tests connectivity to the upstream router
+    
+    Args:
+        iface: The network interface to configure OSPF on
+        ip: The IP address of the interface
+        prefix: The network prefix length
+        m1: NSB subnet in CIDR notation
+        m2: Sensor subnet in CIDR notation
+        client: Client subnet in CIDR notation
+        up: Upstream router IP address
+        area: OSPF area
+        hi: Hello interval in seconds
+        di: Dead interval in seconds
+        
+    Raises:
+        SystemExit: If connectivity to the upstream router cannot be established
+    """
     n1=ipaddress.IPv4Network(m1);n2=ipaddress.IPv4Network(m2);n3=ipaddress.IPv4Network(client)
     
     if DEBUG:
@@ -730,6 +885,17 @@ def configure_ospf(iface, ip, prefix, m1, m2, client, up, area, hi, di):
 
 # Show OSPF state Full/DR - using the original approach with active waiting
 def show_ospf_status():
+    """
+    Wait for and verify OSPF adjacency reaches Full/DR state.
+    
+    This function:
+    - Polls the OSPF neighbor state every second for up to 30 seconds
+    - Checks for Full/DR state in the OSPF neighbor output
+    - Displays routing tables for debugging purposes
+    
+    Returns:
+        bool: True if OSPF reached Full/DR state, False otherwise
+    """
     print('\n=== Waiting for OSPF state Full/DR (30s timeout) ===')
     success = False
     for _ in range(30):
@@ -826,6 +992,37 @@ def configure_static_route(gateway, iface):
 
 # Connectivity tests with DNS fallback logic
 def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, user, pwd, run_dhcp, run_radius, custom_dns_servers=None, custom_ntp_servers=None, test_results=None):
+    """
+    Run a comprehensive suite of network connectivity tests.
+    
+    This function tests:
+    - DNS resolution and connectivity
+    - DHCP relay functionality
+    - RADIUS authentication
+    - NTP synchronization
+    - HTTPS connectivity
+    - SSL certificate validation
+    - UDP connectivity to guest access points
+    
+    Args:
+        iface: The network interface to use for tests
+        ip_addr: The IP address of the interface
+        mgmt1: NSB subnet in CIDR notation
+        client_subnet: Client subnet in CIDR notation
+        dhcp_servers: List of DHCP server IP addresses
+        radius_servers: List of RADIUS server IP addresses
+        secret: RADIUS shared secret
+        user: RADIUS username
+        pwd: RADIUS password
+        run_dhcp: Whether to run DHCP tests
+        run_radius: Whether to run RADIUS tests
+        custom_dns_servers: Optional list of custom DNS servers to test
+        custom_ntp_servers: Optional list of custom NTP servers to test
+        test_results: Optional list to append test results to
+        
+    Returns:
+        list: A list of tuples containing test results (test_name, result)
+    """
     # Initialize empty lists if None
     custom_dns_servers = custom_dns_servers or []
     custom_ntp_servers = custom_ntp_servers or []
@@ -844,7 +1041,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     conf.route.resync()
     
     # Initial connectivity
-    ping_ok = dns_ok = False
+    ping_ok = False
     print(f'\nInitial Ping Tests from {ip_addr}:')
     
     # Test default DNS servers with retry logic
@@ -1340,6 +1537,17 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
 
 # Print test summary
 def print_test_summary(test_results):
+    """
+    Print a summary of all test results.
+    
+    This function:
+    - Filters out tests that shouldn't be included in the summary
+    - Prints each test name and its result (Success/Fail)
+    - Calculates and prints the overall success rate
+    
+    Args:
+        test_results: List of tuples containing test results (test_name, result)
+    """
     print("\n=== Test Summary ===")
     success_count = 0
     total_count = 0
@@ -1363,6 +1571,19 @@ def print_test_summary(test_results):
 
 # Main flow
 def main():
+    """
+    Main execution flow of the Nile Readiness Test.
+    
+    This function:
+    1. Gathers configuration parameters from file or user input
+    2. Records the original state of the network interface
+    3. Configures the interface and adds loopback interfaces
+    4. Sets up a static default route
+    5. Configures OSPF routing
+    6. Runs connectivity tests (DNS, DHCP, RADIUS, NTP, HTTPS, UDP)
+    7. Restores the original state of the system
+    8. Prints a summary of test results
+    """
     # Get user input from config file or interactive prompts
     (test_iface, ip_addr, netmask, gateway, mgmt_interface,
      mgmt1, mgmt2, client_subnet,
