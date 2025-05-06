@@ -1128,7 +1128,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     # Verify the dummy loopback interface is working properly with retry logic
     print(f"Verifying {mgmt1_ip} can reach external targets...")
-    max_retries = 3
+    max_retries = 5
     retry_delay = 2
     loopback_working = False
     
@@ -1146,8 +1146,7 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     
     if not loopback_working:
         print(f"\n{RED}ERROR: Could not establish connectivity from the dummy loopback interface {mgmt1_ip}.{RESET}")
-        print(f"{RED}There is an issue with the testing interface. All future tests will fail.{RESET}")
-        print(f"{RED}Please try the test again after resolving network interface issues.{RESET}")
+        print(f"{RED}Please try the test again after resolving network issues.{RESET}")
         print(f"{RED}Terminating tests...{RESET}")
         return test_results  # Return early with the tests we've done so far
 
