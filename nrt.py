@@ -759,7 +759,8 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
     run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
     
     # Ensure the interface is up and properly configured with retry logic
-    print(f"\nEnsuring interface {iface} is up and properly configured...")
+    if DEBUG:
+        print(f"\nEnsuring interface {iface} is up and properly configured...")
     max_retries = 5
     retry_delay = 2
     interface_up = False
@@ -770,21 +771,25 @@ def configure_interface(iface, ip_addr, netmask, mgmt_interface='end0'):
         iface_addr = run_cmd(['ip', 'addr', 'show', 'dev', iface], capture_output=True, text=True).stdout
         
         if "state UP" in iface_status and f"inet {ip_addr}" in iface_addr:
-            print(f"Interface {iface} is up and properly configured with IP {ip_addr}")
+            if DEBUG:
+                print(f"Interface {iface} is up and properly configured with IP {ip_addr}")
             interface_up = True
             break
         else:
             print(f"Attempt {attempt+1}/{max_retries}: Interface {iface} is not properly configured")
             if "state UP" not in iface_status:
-                print(f"  - Interface is not up, bringing it up...")
+                if DEBUG:
+                    print(f"  - Interface is not up, bringing it up...")
                 run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
             
             if f"inet {ip_addr}" not in iface_addr:
-                print(f"  - IP address {ip_addr} not configured, reconfiguring...")
+                if DEBUG:
+                    print(f"  - IP address {ip_addr} not configured, reconfiguring...")
                 run_cmd(['ip', 'addr', 'flush', 'dev', iface], check=False)
                 run_cmd(['ip', 'addr', 'add', f'{ip_addr}/{prefix}', 'dev', iface], check=True)
             
-            print(f"  - Waiting {retry_delay} seconds before checking again...")
+            if DEBUG:
+                print(f"  - Waiting {retry_delay} seconds before checking again...")
             time.sleep(retry_delay)
     
     if not interface_up:
