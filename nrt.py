@@ -1130,21 +1130,25 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
     print(f"Using mgmt1 dummy loopback interface with IP {mgmt1_ip} as source for tests")
     
     # Verify the dummy loopback interface is working properly with retry logic
-    print(f"Verifying {mgmt1_ip} can reach external targets...")
+    if DEBUG:
+        print(f"Verifying {mgmt1_ip} can reach external targets...")
     max_retries = 5
     retry_delay = 2
     loopback_working = False
     
     for attempt in range(max_retries):
-        print(f"Attempt {attempt+1}/{max_retries}: Testing connectivity from {mgmt1_ip}...")
+        if DEBUG:
+            print(f"Attempt {attempt+1}/{max_retries}: Testing connectivity from {mgmt1_ip}...")
         ping_result = run_cmd(['ping', '-c', '2', '-I', mgmt1_ip, tgt], capture_output=True)
         if ping_result.returncode == 0:
-            print(f"Connectivity from {mgmt1_ip}: {GREEN}Success{RESET}")
+            if DEBUG:
+                print(f"Connectivity from {mgmt1_ip}: {GREEN}Success{RESET}")
             loopback_working = True
             break
         else:
-            print(f"Connectivity from {mgmt1_ip}: {RED}Fail{RESET}")
-            print(f"Waiting {retry_delay} seconds before retrying...")
+            if DEBUG:
+                print(f"Connectivity from {mgmt1_ip}: {RED}Fail{RESET}")
+                print(f"Waiting {retry_delay} seconds before retrying...")
             time.sleep(retry_delay)
     
     if not loopback_working:
