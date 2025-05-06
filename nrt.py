@@ -52,7 +52,7 @@ SSL_PORT = 443
 
 
 # Test if a remote device is running Geneve on UDP port
-def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 3) -> bool:
+def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeout: int = 10) -> bool:
     """
     Test if a target is running Geneve on UDP port (default 6081) using Scapy
     
@@ -73,7 +73,7 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
     try:
         # Create a Geneve packet
         # VNI (Virtual Network Identifier) is a 24-bit value
-        vni = 1  # Example VNI
+        vni = 35762  # Example VNI
         sport = 12345  # Source port
         
         # Craft the packet
