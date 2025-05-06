@@ -1615,6 +1615,7 @@ def main():
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         restore_state(test_iface, state)
         configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
+        add_loopbacks(mgmt1, mgmt2, client_subnet)
         configure_ospf(test_iface, ip_addr, prefix, mgmt1, mgmt2, client_subnet, up, area, hi, di)
         restore_state(test_iface, state)
 
@@ -1647,9 +1648,6 @@ def main():
         
         # Add OSPF test result to the test results list
         test_results.append(("OSPF Adjacency Test", ospf_ok))
-
-        # Update scapy's routing table
-        conf.route.resync()
 
         # Run connectivity tests with the existing test_results list
         test_results = run_tests(test_iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers, secret, username, password, run_dhcp, run_radius, custom_dns_servers, custom_ntp_servers, test_results)
