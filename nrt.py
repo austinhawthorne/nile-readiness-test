@@ -32,7 +32,11 @@ from scapy.config import conf
 from scapy.all import sniff, sr1, send, Raw
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
-from scapy.contrib.geneve import GENEVE
+try:
+    from scapy.contrib.geneve import GENEVE
+except ImportError:
+    print("Warning: Scapy Geneve module not available. Geneve testing will be limited.")
+    GENEVE = None
 
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
@@ -56,12 +60,16 @@ def test_geneve_with_scapy(ip: str, source_ip: str, port: int = UDP_PORT, timeou
         ip: Target IP address to test
         source_ip: Source IP to use for the packet
         port: UDP port to test (default: 6081)
-        timeout: Response timeout in seconds (default: 3)
+        timeout: Response timeout in seconds (default: 10)
         
     Returns:
         bool: True if Geneve is detected, False otherwise
     """
-     
+    if GENEVE is None:
+        print(f"  Warning: Scapy Geneve module not available. Falling back to basic UDP test.")
+        print(f"  Troubleshooting: Install Scapy with Geneve support using 'pip install scapy' (version 2.4.3+)")
+        return check_udp_connectivity_netcat(ip, port, timeout)
+        
     try:
         # Create a Geneve packet
         # VNI (Virtual Network Identifier) is a 24-bit value

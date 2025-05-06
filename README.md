@@ -67,8 +67,14 @@ Running this script will test:
    sudo apt install frr freeradius dnsutils ntpdate curl python3-scapy netcat-openbsd openssl
    ```
 
-   For a Raspberry Pi, I had to add --break-system-packages as shown below to complete the install of dhcppython
+   Install or upgrade Scapy with Geneve support:
    ```
+   pip3 install --upgrade scapy>=2.4.3
+   ```
+
+   For a Raspberry Pi, you may need to add --break-system-packages:
+   ```
+   pip3 install --upgrade scapy>=2.4.3 --break-system-packages
    pip3 install dhcppython --break-system-packages
    ```
 
@@ -133,6 +139,9 @@ sudo ./nrt.py
 
 - **scapy**: Used for OSPF packet sniffing and Geneve protocol testing
   - Version 2.4.3+ recommended for Geneve protocol support
+  - To install Scapy with Geneve support: `pip3 install scapy>=2.4.3`
+  - If you already have Scapy installed but are missing the Geneve module, you may need to upgrade: `pip3 install --upgrade scapy`
+  - On some systems (like Raspberry Pi), you might need to add `--break-system-packages` flag: `pip3 install --upgrade scapy --break-system-packages`
 - **dhcppython**: Used for DHCP relay testing (must be installed via pip3)
 - **socket**: Used for hostname resolution and SSL connectivity testing
 - **re**: Used for IP address validation
