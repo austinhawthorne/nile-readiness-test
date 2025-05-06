@@ -1610,6 +1610,9 @@ def main():
     
     try:
 
+        # Rest interfaces
+        restore_state(test_iface, state)
+        configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         restore_state(test_iface, state)
 
         # Configure the interface (includes validation and retry logic)
