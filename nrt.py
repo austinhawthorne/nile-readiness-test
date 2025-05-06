@@ -968,7 +968,8 @@ def configure_static_route(gateway, iface):
     Returns:
         bool: True if route was added successfully, False otherwise
     """
-    print(f"\nConfiguring static default route via {gateway} on {iface}...")
+    if DEBUG:
+        print(f"\nConfiguring static default route via {gateway} on {iface}...")
     
     # Try to add the route
     run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
@@ -982,30 +983,35 @@ def configure_static_route(gateway, iface):
         # Check if route exists
         route_output = run_cmd(['ip','route','show','default'], capture_output=True, text=True).stdout
         if f"default via {gateway}" in route_output:
-            print(f"Static default route via {gateway} successfully added")
+            if DEBUG:
+                print(f"Static default route via {gateway} successfully added")
             route_added = True
             break
         else:
-            print(f"Attempt {attempt+1}/{max_retries}: Static route not found")
-            print(f"  - Current default routes:")
-            for line in route_output.splitlines():
-                print(f"    {line}")
+            if DEBUG:
+                print(f"Attempt {attempt+1}/{max_retries}: Static route not found")
+                print(f"  - Current default routes:")
+                for line in route_output.splitlines():
+                    print(f"    {line}")
             
             # Try to ensure interface is up before adding route
             iface_status = run_cmd(['ip', 'link', 'show', 'dev', iface], capture_output=True, text=True).stdout
             if "state UP" not in iface_status:
-                print(f"  - Interface {iface} is not up, bringing it up...")
+                if DEBUG:
+                    print(f"  - Interface {iface} is not up, bringing it up...")
                 run_cmd(['ip', 'link', 'set', 'dev', iface, 'up'], check=True)
                 time.sleep(1)  # Give it a moment to come up
             
             # Try adding the route again
-            print(f"  - Retrying route addition...")
+            if DEBUG:
+                print(f"  - Retrying route addition...")
             # First try to delete any existing default routes to avoid conflicts
             run_cmd(['ip','route','del','default'], check=False)
             # Then add our route
             run_cmd(['ip','route','add','default','via',gateway,'metric','200'],check=False)
             
-            print(f"  - Waiting {retry_delay} seconds before checking again...")
+            if DEBUG:
+                print(f"  - Waiting {retry_delay} seconds before checking again...")
             time.sleep(retry_delay)
     
     if not route_added:
