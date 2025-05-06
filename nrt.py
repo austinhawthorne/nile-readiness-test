@@ -1609,6 +1609,9 @@ def main():
     state = record_state(test_iface)
     
     try:
+
+        restore_state(test_iface, state)
+
         # Configure the interface (includes validation and retry logic)
         interface_up = configure_interface(test_iface, ip_addr, netmask, mgmt_interface)
         
