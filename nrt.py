@@ -1116,7 +1116,10 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
         write_resolv(dns_servers)
 
     if not ping_ok:
-        print('Initial ping tests failed. Exiting.')
+        print(f"\n{RED}ERROR: Initial connectivity tests beyond local network have failed.{RESET}")
+        print(f"{RED}All DNS servers (default and custom) are unreachable.{RESET}")
+        print(f"{RED}Please validate your routing configuration and try again.{RESET}")
+        print(f"{RED}Terminating tests...{RESET}")
         sys.exit(1)
 
     # Full suite
