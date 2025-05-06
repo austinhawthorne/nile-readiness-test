@@ -117,8 +117,8 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
         return False, None
         
     try:
-        # Create a filter for UDP packets from the target IP to our source port
-        filter_str = f"udp and src host {ip} and dst port {sport}"
+        # Create a filter for any packets from the target IP (no protocol or port filtering)
+        filter_str = f"src host {ip}"
         
         # Get the list of available interfaces
         available_interfaces = conf.ifaces.keys()
@@ -159,10 +159,8 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
         if not packets:
             print(f"  No response received from {ip}:{port} within {timeout} seconds")
             print(f"  Troubleshooting:")
-            print(f"    - Verify the target IP is correct and reachable (try ping {ip})")
             print(f"    - Check if UDP port {port} is open (try 'nc -vzu {ip} {port}')")
             print(f"    - Verify no firewall is blocking UDP traffic to port {port}")
-            print(f"    - Try increasing the timeout value")
             return False, None
             
         # We got a packet, analyze it
@@ -172,26 +170,31 @@ def sniff_geneve_packet(ip: str, source_ip: str, port: int = UDP_PORT, timeout: 
             print(f"DEBUG: Response summary: {response.summary()}")
             print(f"DEBUG: Response layers: {[layer.name for layer in response.layers()]}")
         
-        if UDP in response and response[UDP].dport == sport:
-            if GENEVE in response:
-                print(f"  Geneve protocol detected on {ip}:{port}")
-                if DEBUG:
-                    geneve_resp = response[GENEVE]
-                    print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
-                    print(f"DEBUG: Geneve version: {geneve_resp.ver}")
-                return True, response
+        # Check if it's a Geneve packet
+        if GENEVE in response:
+            print(f"  Geneve protocol detected on {ip}")
+            if DEBUG:
+                geneve_resp = response[GENEVE]
+                print(f"DEBUG: Geneve VNI: {geneve_resp.vni}")
+                print(f"DEBUG: Geneve version: {geneve_resp.ver}")
+            return True, response
+        
+        # Check if it's a UDP packet
+        elif UDP in response:
+            if response[UDP].dport == sport:
+                print(f"  UDP response received from {ip}:{port}, but not Geneve protocol")
+                print(f"  Troubleshooting: The device at {ip} is responding on UDP but not with Geneve protocol")
             else:
-                print(f"  Response received from {ip}:{port}, but not Geneve protocol")
-                print(f"  Troubleshooting: The device at {ip}:{port} is responding on UDP but not with Geneve protocol")
-                print(f"  Possible causes:")
-                print(f"    - The device is not running Geneve")
-                print(f"    - The device is using a different VNI")
-                print(f"    - The device requires authentication or specific headers")
-                if DEBUG:
-                    print(f"DEBUG: Response payload: {response.summary()}")
+                print(f"  UDP response received but not directed to our source port ({response[UDP].dport} instead of {sport})")
+                print(f"  Troubleshooting: Check firewall rules and NAT configurations")
+            if DEBUG:
+                print(f"DEBUG: UDP payload: {response[UDP].payload}")
+        
+        # It's some other type of packet
         else:
-            print(f"  Response received but not directed to our source port")
-            print(f"  Troubleshooting: Check firewall rules and NAT configurations")
+            print(f"  Non-UDP response received from {ip}")
+            print(f"  Response protocol: {response.summary()}")
+            print(f"  Troubleshooting: The device at {ip} is responding but not with UDP/Geneve")
             
         return False, response
     except Exception as e:
