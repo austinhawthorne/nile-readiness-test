@@ -1,20 +1,42 @@
 # Nile Readiness Test (NRT)
 
-This tool helps test network connectivity and features required for Nile Connect, including Geneve protocol support.
+This tool helps test network connectivity and features required for Nile Connect, including comprehensive network configuration, routing, and service validation.
 
 ## Features
 
-- Geneve protocol testing (UDP port 6081)
-  - Kernel tunnel creation method
-  - Scapy packet method
-  - Basic UDP connectivity fallback
+- Network Interface Configuration
+  - Configures test interface with specified IP address
+  - Creates dummy loopback interfaces for different subnets
+  - Preserves and restores original network state
+
+- Routing Configuration and Testing
+  - OSPF adjacency configuration and testing
+  - Static default route fallback
+  - Automatic detection of OSPF parameters (area, hello interval, dead interval)
+
+- Service Testing
+  - DNS resolution (including custom DNS servers)
+  - DHCP relay functionality
+  - RADIUS authentication
+  - NTP synchronization (including custom NTP servers)
+  - HTTPS connectivity
+  - SSL certificate validation
+  - UDP connectivity (port 6081) for guest access
 
 ## Requirements
 
 - Python 3.6+
-- Scapy (with Geneve module support)
+- Scapy (with OSPF module support)
+- dhcppython library for DHCP testing
 - Root/sudo privileges (for network operations)
-- Netcat (nc) for UDP connectivity testing
+- Required system tools:
+  - FRR (vtysh)
+  - FreeRADIUS client (radclient)
+  - DNS lookup utility (dig)
+  - NTP utility (ntpdate)
+  - HTTPS test utility (curl)
+  - Netcat (nc) for UDP connectivity testing
+  - OpenSSL for SSL certificate verification
 
 ## Installation
 
@@ -29,60 +51,126 @@ This tool helps test network connectivity and features required for Nile Connect
    pip install scapy dhcppython
    ```
 
+3. Install required system tools:
+   ```
+   sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl netcat-openbsd openssl
+   ```
+
 ## Usage
 
-### Testing Geneve Protocol Support
+### Interactive Mode
 
-Test Geneve protocol support using the main script:
+Run the script with sudo privileges:
 
 ```bash
-# Test Geneve protocol support on a specific target
-sudo ./nrt.py --geneve-test --target 145.40.90.203
-
-# Enable debug output for more detailed information
-sudo ./nrt.py --geneve-test --target 145.40.90.203 --debug
-
-# If no target is specified, it will use the first IP from the GUEST_IPS list
-sudo ./nrt.py --geneve-test
+sudo ./nrt.py
 ```
 
-## How Geneve Testing Works
+The script will prompt you for:
+- Management interface to keep enabled
+- Interface for Nile Readiness tests
+- IP address, netmask, and gateway for the test interface
+- NSB subnet, sensor subnet, and client subnet in CIDR notation
+- DHCP server IPs (optional)
+- RADIUS server IPs, shared secret, username, and password (optional)
+- Custom DNS servers (optional)
+- Custom NTP servers (optional)
 
-The Geneve testing functionality uses two methods to test if a target supports the Geneve protocol:
+### Configuration File Mode
 
-1. **Kernel Tunnel Method**: Attempts to create a Geneve tunnel to the target using the Linux kernel's native Geneve support.
-   - Checks if the kernel supports Geneve tunnels
-   - Creates a Geneve tunnel to the target
-   - Assigns an IP address to the tunnel
-   - Brings the tunnel up
-   - Checks if the tunnel is in UP state
+Create a JSON configuration file (e.g., `nrt_config.json`):
 
-2. **Scapy Packet Method**: Uses Scapy to send and receive Geneve packets.
-   - Sends a Geneve packet to the target
-   - Sniffs for a response
-   - Analyzes the response to determine if it's a Geneve packet
+```json
+{
+  "mgmt_interface": "end0",
+  "test_interface": "enxf0a731f41761",
+  "ip_address": "10.200.1.2",
+  "netmask": "255.255.255.252",
+  "gateway": "10.200.1.1",
+  "nsb_subnet": "10.200.10.0/24",
+  "sensor_subnet": "10.200.12.0/24",
+  "client_subnet": "10.234.3.0/24",
+  "run_dhcp_tests": true,
+  "dhcp_servers": ["172.27.5.5"],
+  "run_radius_tests": false,
+  "radius_servers": [],
+  "radius_secret": "",
+  "radius_username": "",
+  "radius_password": "",
+  "run_custom_dns_tests": true,
+  "custom_dns_servers": ["4.2.2.1", "1.1.1.1"],
+  "run_custom_ntp_tests": false,
+  "custom_ntp_servers": ["ntp.internal.example.com", "10.0.0.123"]
+}
+```
 
-3. **Basic UDP Connectivity Fallback**: If both methods fail, it checks if the UDP port is open.
-   - Uses netcat to check if the UDP port is open
-   - Provides troubleshooting information
+Then run the script with the config file:
+
+```bash
+sudo ./nrt.py --config nrt_config.json
+```
+
+### Debug Mode
+
+Enable debug output for more detailed information:
+
+```bash
+sudo ./nrt.py --debug
+# or with config file
+sudo ./nrt.py --debug --config nrt_config.json
+```
+
+## How It Works
+
+The Nile Readiness Test performs the following steps:
+
+1. **Pre-flight Checks**: Verifies all required tools are installed
+2. **State Recording**: Records the original state of the network interface
+3. **Interface Configuration**: Configures the test interface with the specified IP address
+4. **Loopback Creation**: Creates dummy loopback interfaces for each subnet
+5. **Static Route Configuration**: Sets up a static default route
+6. **OSPF Configuration**:
+   - Sniffs for OSPF Hello packets to detect parameters
+   - Configures OSPF routing using FRR
+   - Verifies OSPF adjacency reaches Full/DR state
+7. **Connectivity Tests**:
+   - DNS resolution tests
+   - DHCP relay tests (if enabled)
+   - RADIUS authentication tests (if enabled)
+   - NTP synchronization tests
+   - HTTPS connectivity tests
+   - SSL certificate validation
+   - UDP connectivity tests for guest access
+8. **State Restoration**: Restores the original state of the network interface
+9. **Test Summary**: Displays a summary of all test results
 
 ## Troubleshooting
 
-- **Kernel Tunnel Method Fails**:
-  - Check if your kernel supports Geneve tunnels (`modprobe geneve`)
-  - Verify you have permission to create network interfaces (run as root/sudo)
-  - Check network connectivity to the target
+- **Interface Configuration Fails**:
+  - Verify you have permission to configure network interfaces (run as root/sudo)
+  - Check if the interface exists and is not in use by another process
+  - Try disabling NetworkManager or other network management tools
 
-- **Scapy Packet Method Fails**:
-  - Check if Scapy is installed with Geneve support
-  - Verify you have permission to send raw packets (run as root/sudo)
-  - Check if the interface is up and has proper IP configuration
+- **OSPF Adjacency Fails**:
+  - Verify the upstream router is sending OSPF Hello packets
+  - Check if there are firewall rules blocking OSPF traffic (protocol 89)
+  - Ensure the OSPF parameters (area, hello interval, dead interval) match
 
-- **Basic UDP Connectivity Fails**:
-  - Check if the target is running
-  - Verify there is no firewall blocking UDP traffic to port 6081
-  - The target may not support Geneve protocol
+- **DHCP Relay Tests Fail**:
+  - Verify the DHCP server is reachable
+  - Check if the DHCP server is configured to accept relay requests
+  - Ensure the client subnet is properly configured
+
+- **RADIUS Tests Fail**:
+  - Verify the RADIUS server is reachable
+  - Check if the shared secret, username, and password are correct
+  - Ensure the RADIUS server is configured to accept authentication requests
+
+- **DNS/NTP/HTTPS Tests Fail**:
+  - Check if the DNS/NTP/HTTPS servers are reachable
+  - Verify there are no firewall rules blocking the traffic
+  - Ensure the routing is properly configured
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.
