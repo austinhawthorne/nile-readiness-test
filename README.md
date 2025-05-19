@@ -1,125 +1,176 @@
-# nile-readiness-test
-Script to test that a network is ready to support a Nile installation.  The script mimics what a Nile gateway will perform to bring up a Nile service, as well as tests some basic network services.
+# Nile Readiness Test (NRT)
 
-Running this script will test:
-- OSPF
-  - Will listen for OSPF Hello packets and configure OSPF on FRR to build a neighbor adjacency and advertise routes for defined subnets (NSB, Sensor, Client).
-  - Will fall back to static if this fails.
-- DNS Reachability
-  - Will try the default DNS servers for Nile.
-  - If that fails, will prompt for a user specified DNS server to use.
-- NTP Reachability
-  - Will run a test to sync with default Nile defined NTP servers
-- DHCP Server Reachability
-  - Will run a synthetic test against a user defined DHCP server, from the defined client subnet
-- RADIUS Reachability
-  - Will run a sythentic test against a user defined RADIUS server.
-- Required Cloud Reachability for Nile Service
-  - Will run a TCP SYN test via NMAP
+This tool helps test network connectivity and features required for Nile Connect, including comprehensive network configuration, routing, and service validation.
 
-Requires:
-- frr
-- scapy (python module)
-- dig
-- ntpdate
-- curl
-- radclient (bundled with freeradius)
+## Features
 
-Usage:  
-- Connect host to upstream firewall port that will be used for Nile uplink
-- Ensure no other network connections are active on host
-- Launch script:  sudo python3 nrt.py
+- Network Interface Configuration
+  - Configures test interface with specified IP address
+  - Creates dummy loopback interfaces for different subnets
+  - Preserves and restores original network state
 
-Sample Output:
-```
-austin@client1:~ $ sudo python nrt.py
-Interface to configure (e.g., eth0): eth1
-IP address: 10.0.0.2
-Netmask (e.g. 255.255.255.0): 255.255.255.0
-Gateway IP: 10.0.0.1
-NSB subnet (CIDR, e.g. 192.168.1.0/24): 10.0.1.0/24
-Sensor subnet (CIDR): 10.0.2.0/24
-Client subnet (CIDR): 10.0.3.0/24
-Perform DHCP tests? [y/N]: y
-DHCP server IP(s) (comma-separated): 172.16.0.100
-Perform RADIUS tests? [y/N]: y
-RADIUS server IP(s) (comma-separated): 172.16.0.100
-RADIUS shared secret: abc123
-RADIUS test username: bob
-RADIUS test password: abc123
-Configuring eth1 → 10.0.0.2/255.255.255.0
-Loopback dummy_mgmt1 → 10.0.1.1/24
-Loopback dummy_mgmt2 → 10.0.2.1/24
-Loopback dummy_client → 10.0.3.1/24
-Waiting for OSPF Hello...
-Note: this version of vtysh never writes vtysh.conf
-Building Configuration...
-Integrated configuration saved to /etc/frr/frr.conf
-[OK]
-OSPF adjacency configured
+- Routing Configuration and Testing
+  - OSPF adjacency configuration and testing
+  - Static default route fallback
+  - Automatic detection of OSPF parameters (area, hello interval, dead interval)
 
-=== Waiting for OSPF state Full/DR (30s timeout) ===
-OSPF reached Full/DR state
+- Service Testing
+  - DNS resolution (including custom DNS servers)
+  - DHCP relay functionality
+  - RADIUS authentication
+  - NTP synchronization (including custom NTP servers)
+  - HTTPS connectivity
+  - SSL certificate validation
+  - UDP connectivity (port 6081) for guest access
 
-=== Routing Table ===
-Codes: K - kernel route, C - connected, S - static, R - RIP,
-       O - OSPF, I - IS-IS, B - BGP, E - EIGRP, N - NHRP,
-       T - Table, v - VNC, V - VNC-Direct, A - Babel, F - PBR,
-       f - OpenFabric,
-       > - selected route, * - FIB route, q - queued, r - rejected, b - backup
-       t - trapped, o - offload failure
+## Requirements
 
-O   0.0.0.0/0 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-K>* 0.0.0.0/0 [0/200] via 10.0.0.1, eth1, 00:00:21
-O   10.0.0.0/24 [110/100] is directly connected, eth1, weight 1, 00:00:21
-C>* 10.0.0.0/24 is directly connected, eth1, 00:00:21
-O   10.0.1.0/24 [110/10] is directly connected, dummy_mgmt1, weight 1, 00:00:21
-C>* 10.0.1.0/24 is directly connected, dummy_mgmt1, 00:00:21
-O   10.0.2.0/24 [110/10] is directly connected, dummy_mgmt2, weight 1, 00:00:21
-C>* 10.0.2.0/24 is directly connected, dummy_mgmt2, 00:00:21
-O   10.0.3.0/24 [110/10] is directly connected, dummy_client, weight 1, 00:00:21
-C>* 10.0.3.0/24 is directly connected, dummy_client, 00:00:21
-O>* 10.0.100.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 10.10.20.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 10.253.240.0/20 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 172.16.0.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
-O>* 192.168.1.0/24 [110/10] via 10.0.0.1, eth1, weight 1, 00:00:05
+- Python 3.6+
+- Scapy (with OSPF module support)
+- dhcppython library for DHCP testing
+- Root/sudo privileges (for network operations)
+- Required system tools:
+  - FRR (vtysh)
+  - FreeRADIUS client (radclient)
+  - DNS lookup utility (dig)
+  - NTP utility (ntpdate)
+  - HTTPS test utility (curl)
+  - Netcat (nc) for UDP connectivity testing
+  - OpenSSL for SSL certificate verification
 
-OSPF adjacency test: Success
-Initial Ping Tests:
-Ping 8.8.8.8: Success
-Ping 8.8.4.4: Success
-Initial DNS Tests (@ 8.8.8.8, 8.8.4.4):
-DNS @8.8.8.8: Fail
-DNS @8.8.4.4: Fail
-Default DNS tests failed. Enter alternate DNS servers? [y/N]: y
-Enter DNS server IP(s) (comma-separated): 1.1.1.1
-Initial DNS Tests (@ 1.1.1.1):
-DNS @1.1.1.1: Success
+## Installation
 
-Full Test Suite:
-Ping 1.1.1.1: Success
-DNS @1.1.1.1: Success
-=== DHCP tests (L3 relay) ===
-DHCP relay to 172.16.0.100: Success
-=== RADIUS tests ===
-RADIUS 172.16.0.100: Success
-=== NTP tests ===
-NTP time.google.com: Success
-NTP pool.ntp.org: Success
-=== HTTPS tests ===
-HTTPS https://u1.nilesecure.com: Success
-HTTPS https://ne-u1.nile-global.cloud: Success
-HTTPS https://s3.us-west-2.amazonaws.com/nile-prod-us-west-2: Success
+1. Clone this repository:
+   ```
+   git clone https://github.com/yourusername/nile-readiness-test.git
+   cd nile-readiness-test
+   ```
 
-Restoring original state...
-Synchronizing state of frr.service with SysV service script with /lib/systemd/systemd-sysv-install.
-Executing: /lib/systemd/systemd-sysv-install disable frr
-Removed FRR config, stopped service, restored DNS.
+2. Install required Python packages:
+   ```
+   pip install scapy dhcppython
+   ```
+
+3. Install required system tools:
+   ```
+   sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl netcat-openbsd openssl
+   ```
+
+## Usage
+
+### Interactive Mode
+
+Run the script with sudo privileges:
+
+```bash
+sudo ./nrt.py
 ```
 
-Notes:
-- Only tested on Raspberry Pi, should run on any debian based distribution
-- Will be adding in checks for Nile Cloud Services, like Guest
-- Will add the ability to check for dependencies and install if missing
-- RADIUS is sourced from the interface IP of the uplink, need to change to the NSB subnet interface IP.  Radclient does not allow this, need to investigate.
+The script will prompt you for:
+- Management interface to keep enabled
+- Interface for Nile Readiness tests
+- IP address, netmask, and gateway for the test interface
+- NSB subnet, sensor subnet, and client subnet in CIDR notation
+- DHCP server IPs (optional)
+- RADIUS server IPs, shared secret, username, and password (optional)
+- Custom DNS servers (optional)
+- Custom NTP servers (optional)
+
+### Configuration File Mode
+
+Create a JSON configuration file (e.g., `nrt_config.json`):
+
+```json
+{
+  "mgmt_interface": "end0",
+  "test_interface": "enxf0a731f41761",
+  "ip_address": "10.200.1.2",
+  "netmask": "255.255.255.252",
+  "gateway": "10.200.1.1",
+  "nsb_subnet": "10.200.10.0/24",
+  "sensor_subnet": "10.200.12.0/24",
+  "client_subnet": "10.234.3.0/24",
+  "run_dhcp_tests": true,
+  "dhcp_servers": ["172.27.5.5"],
+  "run_radius_tests": false,
+  "radius_servers": [],
+  "radius_secret": "",
+  "radius_username": "",
+  "radius_password": "",
+  "run_custom_dns_tests": true,
+  "custom_dns_servers": ["4.2.2.1", "1.1.1.1"],
+  "run_custom_ntp_tests": false,
+  "custom_ntp_servers": ["ntp.internal.example.com", "10.0.0.123"]
+}
+```
+
+Then run the script with the config file:
+
+```bash
+sudo ./nrt.py --config nrt_config.json
+```
+
+### Debug Mode
+
+Enable debug output for more detailed information:
+
+```bash
+sudo ./nrt.py --debug
+# or with config file
+sudo ./nrt.py --debug --config nrt_config.json
+```
+
+## How It Works
+
+The Nile Readiness Test performs the following steps:
+
+1. **Pre-flight Checks**: Verifies all required tools are installed
+2. **State Recording**: Records the original state of the network interface
+3. **Interface Configuration**: Configures the test interface with the specified IP address
+4. **Loopback Creation**: Creates dummy loopback interfaces for each subnet
+5. **Static Route Configuration**: Sets up a static default route
+6. **OSPF Configuration**:
+   - Sniffs for OSPF Hello packets to detect parameters
+   - Configures OSPF routing using FRR
+   - Verifies OSPF adjacency reaches Full/DR state
+7. **Connectivity Tests**:
+   - DNS resolution tests
+   - DHCP relay tests (if enabled)
+   - RADIUS authentication tests (if enabled)
+   - NTP synchronization tests
+   - HTTPS connectivity tests
+   - SSL certificate validation
+   - UDP connectivity tests for guest access
+8. **State Restoration**: Restores the original state of the network interface
+9. **Test Summary**: Displays a summary of all test results
+
+## Troubleshooting
+
+- **Interface Configuration Fails**:
+  - Verify you have permission to configure network interfaces (run as root/sudo)
+  - Check if the interface exists and is not in use by another process
+  - Try disabling NetworkManager or other network management tools
+
+- **OSPF Adjacency Fails**:
+  - Verify the upstream router is sending OSPF Hello packets
+  - Check if there are firewall rules blocking OSPF traffic (protocol 89)
+  - Ensure the OSPF parameters (area, hello interval, dead interval) match
+
+- **DHCP Relay Tests Fail**:
+  - Verify the DHCP server is reachable
+  - Check if the DHCP server is configured to accept relay requests
+  - Ensure the client subnet is properly configured
+
+- **RADIUS Tests Fail**:
+  - Verify the RADIUS server is reachable
+  - Check if the shared secret, username, and password are correct
+  - Ensure the RADIUS server is configured to accept authentication requests
+
+- **DNS/NTP/HTTPS Tests Fail**:
+  - Check if the DNS/NTP/HTTPS servers are reachable
+  - Verify there are no firewall rules blocking the traffic
+  - Ensure the routing is properly configured
+
+## License
+
+This project is licensed under the MIT License.
