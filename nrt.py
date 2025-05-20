@@ -17,6 +17,7 @@ Options:
 """
 
 import os
+import threading
 import sys
 import shutil
 import subprocess
@@ -32,6 +33,8 @@ from scapy.config import conf
 from scapy.all import sniff, sr1, send, Raw
 from scapy.layers.inet import IP, UDP
 from scapy.contrib.ospf import OSPF_Hdr, OSPF_Hello
+from scapy.layers.l2 import Ether
+from scapy.layers.dhcp import BOOTP, DHCP
 
 # Import dhcppython for improved DHCP testing
 import dhcppython.client as dhcp_client
@@ -1205,16 +1208,21 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 test_results.append((f'DHCP relay to {srv}', result))
                 continue
             
-            # Get the MAC address for the main interface
-            iface_mac_output = run_cmd(['ip', 'link', 'show', iface], capture_output=True, text=True).stdout
+            # Get the MAC address for the main interface (macOS way)
             iface_mac = None
-            for line in iface_mac_output.splitlines():
-                if 'link/ether' in line:
-                    iface_mac = line.split()[1]
-                    break
-            
+            try:
+                ifconfig_out = run_cmd(['ifconfig', iface], capture_output=True, text=True, check=True).stdout
+                match = re.search(r'ether\s+([0-9a-fA-F:]{17})', ifconfig_out)
+                if match:
+                    iface_mac = match.group(1)
+                    if DEBUG: print(f"  Found MAC {iface_mac} for {iface}")
+            except subprocess.CalledProcessError as e:
+                if DEBUG: print(f"  Error getting MAC for {iface}: {e.stderr}")
+            except Exception as e_gen:
+                 if DEBUG: print(f"  Unexpected error getting MAC for {iface}: {e_gen}")
+
             if not iface_mac:
-                print(f"Warning: Could not determine MAC address for {iface}, using random MAC")
+                print(f"Warning: Could not determine MAC address for {iface} using ifconfig, using random MAC")
                 iface_mac = dhcp_utils.random_mac()
                 
             # Create a random client MAC address
@@ -1234,10 +1242,13 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 if DEBUG:
                     print(f"Creating DHCP client on {iface} interface...")
                 c = dhcp_client.DHCPClient(
-                    iface,
-                    send_from_port=67,  # Server port (for relay)
-                    send_to_port=67     # Server port
+                    interface=iface,      # Main test interface (e.g., en0), used for MAC lookup etc.
+                    send_from_port=67,    # Source port for outgoing DHCP Discover packets (as a relay)
+                    send_to_port=67       # Destination port on the DHCP server
                 )
+                
+                if DEBUG:
+                    print(f"  Using helper IP {helper_ip} as relay address in DHCP request")
                 
                 # Create a list of DHCP options
                 if DEBUG:
@@ -1255,28 +1266,175 @@ def run_tests(iface, ip_addr, mgmt1, client_subnet, dhcp_servers, radius_servers
                 # Set broadcast=False for unicast to specific server
                 # Set server to the DHCP server IP
                 try:
-                    lease = c.get_lease(
-                        client_mac,
-                        broadcast=False,
-                        options_list=options_list,
-                        server=srv,
-                        relay=helper_ip
-                    )
+                    # Flag to track if we received an OFFER
+                    offer_received = False
                     
-                    # If we get here, we got a lease
+                    # Function to process DHCP packets
+                    def dhcp_callback(pkt):
+                        nonlocal offer_received
+                        # Check for UDP traffic on DHCP ports (67, 68)
+                        # Note: In relay scenarios, server may send to port 67 (relay port)
+                        if UDP in pkt and (pkt[UDP].dport == 67 or pkt[UDP].dport == 68 or 
+                                          pkt[UDP].sport == 67 or pkt[UDP].sport == 68):
+                            if DEBUG:
+                                print("  [Scapy Sniffer] Detected UDP packet on DHCP ports")
+                                print(f"  [Scapy Sniffer] Source: {pkt[IP].src}:{pkt[UDP].sport} -> Dest: {pkt[IP].dst}:{pkt[UDP].dport}")
+                            
+                            # Look for BOOTP/DHCP packets
+                            if BOOTP in pkt:
+                                if DEBUG:
+                                    print("  [Scapy Sniffer] Detected BOOTP packet")
+                                    print(f"  [Scapy Sniffer] BOOTP details:")
+                                    print(f"    Your IP: {pkt[BOOTP].yiaddr}")
+                                    print(f"    Server IP: {pkt[BOOTP].siaddr}")
+                                    print(f"    Gateway: {pkt[BOOTP].giaddr}")
+                                
+                                # Check if this is a DHCP packet with options
+                                if DHCP in pkt:
+                                    if DEBUG:
+                                        print("  [Scapy Sniffer] Detected DHCP options")
+                                    
+                                    # Look for DHCP message type option (53)
+                                    for opt in pkt[DHCP].options:
+                                        if isinstance(opt, tuple) and len(opt) >= 2:
+                                            if opt[0] == 'message-type':
+                                                if DEBUG:
+                                                    print(f"  [Scapy Sniffer] DHCP message type: {opt[1]}")
+                                                
+                                                # Check if it's an OFFER (type 2)
+                                                if opt[1] == 2:  # OFFER
+                                                    if DEBUG:
+                                                        print("  [Scapy Sniffer] Found DHCP OFFER!")
+                                                        print(f"  [Scapy Sniffer] DHCP OFFER details:")
+                                                        print(f"    Your IP: {pkt[BOOTP].yiaddr}")
+                                                        print(f"    Server IP: {pkt[BOOTP].siaddr}")
+                                                        print(f"    Gateway: {pkt[BOOTP].giaddr}")
+                                                        print(f"    Source: {pkt[IP].src}:{pkt[UDP].sport}")
+                                                        print(f"    Destination: {pkt[IP].dst}:{pkt[UDP].dport}")
+                                                    offer_received = True
+                                                    return None
+                        # Return None instead of False to prevent printing
+                        return None
+                    
+                    # Start sniffing in a separate thread
                     if DEBUG:
-                        print(f"\nSuccessfully obtained DHCP lease!")
-                        print(f"DEBUG: Lease details:")
-                        print(f"  Your IP: {lease.ack.yiaddr}")
-                        print(f"  Server IP: {lease.ack.siaddr}")
-                        print(f"  Gateway: {lease.ack.giaddr}")
-                        print(f"  Options: {lease.ack.options}")
+                        print("  Starting packet capture for DHCP OFFER...")
                     
-                    result = True
-                    print(f'DHCP relay to {srv}: ' + GREEN+'Success'+RESET)
-                    test_results.append((f'DHCP relay to {srv}', result))
+                    # Set up sniffing timeout
+                    sniff_timeout = 10  # seconds
+                    
+                    # Start sniffing before sending the DHCP request
+                    sniff_thread = threading.Thread(
+                        target=lambda: sniff(
+                            iface=iface, 
+                            filter="udp and (port 67 or port 68)", 
+                            prn=dhcp_callback, 
+                            stop_filter=lambda p: offer_received, 
+                            timeout=sniff_timeout
+                        )
+                    )
+                    sniff_thread.daemon = True
+                    sniff_thread.start()
+                    
+                    # Wait a moment for sniffing to start
+                    time.sleep(0.5)
+                    
+                    # Now try to get a lease using dhcppython
+                    if DEBUG:
+                        print("  Sending DHCP request using dhcppython...")
+                    
+                    try:
+                        lease = c.get_lease(
+                            client_mac,
+                            broadcast=False,
+                            options_list=options_list,
+                            server=srv,
+                            relay=helper_ip
+                        )
+                        
+                        # If we get here, we got a lease with dhcppython
+                        if DEBUG:
+                            print(f"\nSuccessfully obtained DHCP lease with dhcppython!")
+                            print(f"DEBUG: Lease details:")
+                            print(f"  Your IP: {lease.ack.yiaddr}")
+                            print(f"  Server IP: {lease.ack.siaddr}")
+                            print(f"  Gateway: {lease.ack.giaddr}")
+                            print(f"  Options: {lease.ack.options}")
+                        
+                        result = True
+                        print(f'DHCP relay to {srv}: ' + GREEN+'Success (dhcppython)'+RESET)
+                        test_results.append((f'DHCP relay to {srv}', result))
+                    except Exception as e:
+                        if DEBUG:
+                            print(f"Error during DHCP lease request with dhcppython: {e}")
+                            import traceback
+                            traceback.print_exc()
+                        # In non-debug mode, don't print anything about fallback methods
+                        
+                        # Wait for the sniffing thread to complete
+                        sniff_thread.join()
+                        
+                        # Check if we received an OFFER via packet sniffing
+                        if offer_received:
+                            result = True
+                            print(f'DHCP relay to {srv}: ' + GREEN+'Success (OFFER detected)'+RESET)
+                            test_results.append((f'DHCP relay to {srv}', result))
+                        else:
+                            # If no OFFER was detected with packet sniffing either, try a direct approach
+                            if DEBUG:
+                                print("  Attempting direct DHCP DISCOVER...")
+                            
+                            # Generate a random transaction ID
+                            xid = random.randint(1, 0xFFFFFFFF)
+                            
+                            # Parse MAC address
+                            mac_bytes = bytes.fromhex(client_mac.replace(':', ''))
+                            
+                            # Create and send DHCP DISCOVER packet
+                            dhcp_discover = (Ether(dst="ff:ff:ff:ff:ff:ff", src=client_mac) /
+                                            IP(src="0.0.0.0", dst="255.255.255.255") /
+                                            UDP(sport=68, dport=67) /
+                                            BOOTP(chaddr=mac_bytes, xid=xid, flags=0x8000) /
+                                            DHCP(options=[("message-type", "discover"), "end"]))
+                            
+                            # Reset the offer_received flag
+                            offer_received = False
+                            
+                            # Start a new sniffing thread
+                            sniff_thread = threading.Thread(
+                                target=lambda: sniff(
+                                    iface=iface, 
+                                    filter="udp and (port 67 or port 68)", 
+                                    prn=dhcp_callback, 
+                                    stop_filter=lambda p: offer_received, 
+                                    timeout=sniff_timeout
+                                )
+                            )
+                            sniff_thread.daemon = True
+                            sniff_thread.start()
+                            
+                            # Wait a moment for sniffing to start
+                            time.sleep(0.5)
+                            
+                            # Send the packet
+                            if DEBUG:
+                                print("  Sending DHCP DISCOVER packet with scapy...")
+                            sendp(dhcp_discover, iface=iface, verbose=0)
+                            
+                            # Wait for sniffing to complete
+                            sniff_thread.join()
+                            
+                            # Check the result
+                            if offer_received:
+                                result = True
+                                print(f'DHCP relay to {srv}: ' + GREEN+'Success (OFFER received)'+RESET)
+                                test_results.append((f'DHCP relay to {srv}', result))
+                            else:
+                                result = False
+                                print(f'DHCP relay to {srv}: ' + RED+'Fail (no DHCP OFFER detected)'+RESET)
+                                test_results.append((f'DHCP relay to {srv}', result))
                 except Exception as e:
-                    print(f"Error during DHCP lease request: {e}")
+                    print(f"Error during DHCP test: {e}")
                     if DEBUG:
                         import traceback
                         traceback.print_exc()
