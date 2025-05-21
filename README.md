@@ -56,7 +56,7 @@ This tool helps test network connectivity and features required for Nile Connect
    sudo apt update && sudo apt install frr freeradius-client dnsutils ntpdate curl netcat-openbsd openssl
    ```
 
-**Note** Ensure pip is installed.  On some sustems you may have to get python modules through apt.  Also, freeradius-client may only be available through freeradius package.
+**Note** Ensure pip is installed.  On some systems you may have to get python modules through apt.  Also, freeradius-client may only be available through freeradius package.
 
 ## Usage
 
